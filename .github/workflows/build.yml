@@ -1,0 +1,30 @@
+name: Build and safety checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build and run isolated Windows safety checks
+        shell: pwsh
+        run: .\check.ps1 -Dotnet dotnet
+      - name: Collect release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClearSpace-win-x64
+          path: dist/ClearSpace-*-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14

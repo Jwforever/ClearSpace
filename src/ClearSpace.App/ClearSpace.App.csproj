@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>ClearSpace</AssemblyName>
+    <RootNamespace>ClearSpace.App</RootNamespace>
+    <Version>0.1.1</Version>
+    <AssemblyVersion>0.1.1.0</AssemblyVersion>
+    <FileVersion>0.1.1.0</FileVersion>
+    <Company>ClearSpace</Company>
+    <Product>ClearSpace 清屿</Product>
+    <Description>本地 Windows 软件管理与空间整理工具</Description>
+    <ApplicationIcon>..\..\assets\ClearSpace.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ClearSpace.Core\ClearSpace.Core.csproj" />
+    <Resource Include="assets\clearspace-mark.png" />
+    <Resource Include="..\..\assets\ClearSpace.ico" Link="assets\ClearSpace.ico" />
+  </ItemGroup>
+</Project>

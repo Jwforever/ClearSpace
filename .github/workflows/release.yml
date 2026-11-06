@@ -1,0 +1,42 @@
+name: Publish Windows release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build and run isolated Windows safety checks
+        shell: pwsh
+        run: .\check.ps1 -Dotnet dotnet
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          $tag = if ($env:INPUT_TAG) { $env:INPUT_TAG } else { $env:GITHUB_REF_NAME }
+          $archive = Get-ChildItem dist -Filter 'ClearSpace-*-win-x64.zip' | Select-Object -First 1
+          if (-not $archive) { throw 'Windows release archive not found.' }
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title "ClearSpace $tag" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create release.' }
+          }
+          gh release upload $tag $archive.FullName "$($archive.FullName).sha256" --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not upload release archive.' }

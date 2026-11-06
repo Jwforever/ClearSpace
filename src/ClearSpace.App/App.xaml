@@ -1,0 +1,117 @@
+<Application x:Class="ClearSpace.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+  <Application.Resources>
+    <SolidColorBrush x:Key="Ink" Color="#20332F" />
+    <SolidColorBrush x:Key="Muted" Color="#75827C" />
+    <SolidColorBrush x:Key="Accent" Color="#247C62" />
+    <SolidColorBrush x:Key="Line" Color="#E6EBE7" />
+    <Style TargetType="Window">
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{StaticResource Ink}" />
+      <Setter Property="Background" Value="#F7F8F5" />
+    </Style>
+    <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Ink}" /></Style>
+    <Style x:Key="MutedText" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource Muted}" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style x:Key="Card" TargetType="Border">
+      <Setter Property="Background" Value="White" /><Setter Property="CornerRadius" Value="12" />
+      <Setter Property="BorderBrush" Value="{StaticResource Line}" /><Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="22" />
+    </Style>
+    <Style TargetType="Button">
+      <Setter Property="Cursor" Value="Hand" /><Setter Property="Padding" Value="16,10" />
+      <Setter Property="Background" Value="White" /><Setter Property="Foreground" Value="{StaticResource Ink}" />
+      <Setter Property="BorderBrush" Value="#DCE4DE" /><Setter Property="BorderThickness" Value="1" />
+      <Setter Property="FontSize" Value="13" /><Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Template">
+        <Setter.Value><ControlTemplate TargetType="Button">
+          <Border x:Name="Body" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7" Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Body" Property="Opacity" Value="0.78" /></Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Body" Property="Opacity" Value="0.4" /></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="{StaticResource Accent}" /><Setter Property="Foreground" Value="White" />
+      <Setter Property="BorderBrush" Value="{StaticResource Accent}" />
+    </Style>
+    <Style x:Key="Nav" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="#788B82" /><Setter Property="Margin" Value="0,3" />
+      <Setter Property="Cursor" Value="Hand" /><Setter Property="FontSize" Value="14" />
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+        <Border x:Name="Body" Background="Transparent" CornerRadius="8" Padding="17,14">
+          <ContentPresenter />
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Body" Property="Background" Value="#18362D" /></Trigger>
+          <Trigger Property="IsChecked" Value="True">
+            <Setter TargetName="Body" Property="Background" Value="#254238" /><Setter Property="Foreground" Value="#EAF4ED" />
+          </Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="CheckBox">
+      <Setter Property="VerticalAlignment" Value="Center" /><Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
+        <StackPanel Orientation="Horizontal">
+          <Border x:Name="Box" Width="17" Height="17" Background="White" BorderBrush="#BDCBC2" BorderThickness="1" CornerRadius="4" VerticalAlignment="Center">
+            <TextBlock x:Name="Tick" Text="✓" Foreground="White" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+          </Border>
+          <ContentPresenter Margin="9,0,0,0" VerticalAlignment="Center" />
+        </StackPanel>
+        <ControlTemplate.Triggers><Trigger Property="IsChecked" Value="True">
+          <Setter TargetName="Box" Property="Background" Value="{StaticResource Accent}" />
+          <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}" />
+          <Setter TargetName="Tick" Property="Visibility" Value="Visible" />
+        </Trigger></ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="DataGrid">
+      <Setter Property="Background" Value="White" /><Setter Property="BorderThickness" Value="0" />
+      <Setter Property="AutoGenerateColumns" Value="False" /><Setter Property="CanUserAddRows" Value="False" />
+      <Setter Property="CanUserDeleteRows" Value="False" /><Setter Property="CanUserReorderColumns" Value="False" />
+      <Setter Property="HeadersVisibility" Value="Column" /><Setter Property="RowHeaderWidth" Value="0" />
+      <Setter Property="GridLinesVisibility" Value="None" /><Setter Property="RowHeight" Value="62" />
+      <Setter Property="SelectionMode" Value="Single" /><Setter Property="SelectionUnit" Value="FullRow" />
+      <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" /><Setter Property="EnableRowVirtualization" Value="True" />
+    </Style>
+    <Style TargetType="DataGridColumnHeader">
+      <Setter Property="Background" Value="#F8FAF7" /><Setter Property="Foreground" Value="#819087" />
+      <Setter Property="FontSize" Value="11" /><Setter Property="Padding" Value="12,14" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" /><Setter Property="BorderBrush" Value="{StaticResource Line}" />
+      <Setter Property="FontWeight" Value="Normal" />
+    </Style>
+    <Style TargetType="DataGridCell">
+      <Setter Property="BorderThickness" Value="0" /><Setter Property="Padding" Value="12,0" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="DataGridCell">
+        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+          <ContentPresenter VerticalAlignment="Center" />
+        </Border>
+      </ControlTemplate></Setter.Value></Setter>
+      <Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Foreground" Value="{StaticResource Ink}" /><Setter Property="Background" Value="Transparent" /></Trigger></Style.Triggers>
+    </Style>
+    <Style TargetType="DataGridRow">
+      <Setter Property="BorderBrush" Value="#EFF2EE" /><Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Background" Value="White" /><Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#F7FAF7" /></Trigger>
+        <Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#EDF5EF" /></Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style TargetType="ToolTip">
+      <Setter Property="MaxWidth" Value="650" /><Setter Property="Background" Value="White" />
+      <Setter Property="Padding" Value="12,8" /><Setter Property="BorderBrush" Value="#DCE4DE" />
+    </Style>
+  </Application.Resources>
+</Application>
