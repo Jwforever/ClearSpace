@@ -28,7 +28,12 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = Model;
-        Model.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Model.Busy) && !Model.Busy) ScheduleResiduePrompts(); };
+        Model.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(Model.Busy)) return;
+            LargeFiles.Busy = Model.Busy;
+            if (!Model.Busy) ScheduleResiduePrompts();
+        };
         uninstallRefreshTimer.Tick += UninstallRefresh_Tick;
     }
 
@@ -47,6 +52,7 @@ public partial class MainWindow : Window
         }
         LoadHistory();
         LoadResiduePlans();
+        LoadLargeFileDrives();
         await RefreshApps();
     }
 
@@ -66,11 +72,13 @@ public partial class MainWindow : Window
         string page = item.Tag?.ToString() ?? "apps";
         AppsPage.Visibility = page == "apps" ? Visibility.Visible : Visibility.Collapsed;
         CleanupPage.Visibility = page == "cleanup" ? Visibility.Visible : Visibility.Collapsed;
+        LargeFilesPage.Visibility = page == "large" ? Visibility.Visible : Visibility.Collapsed;
         HistoryPage.Visibility = page == "history" ? Visibility.Visible : Visibility.Collapsed;
         AboutPage.Visibility = page == "about" ? Visibility.Visible : Visibility.Collapsed;
         (Model.PageTitle, Model.PageDescription) = page switch
         {
             "cleanup" => ("空间清理", "从一次预览开始，为电脑留出更多空间。"),
+            "large" => ("大文件清理", "找出占空间的文件，核对后再整理。"),
             "history" => ("操作记录", "每一次整理，都有迹可循。"),
             "about" => ("关于清屿", "一个简单、透明的本地整理工具。"),
             _ => ("软件管理", "看清每一款应用，让卸载更从容。")
@@ -412,6 +420,7 @@ public partial class MainWindow : Window
             await Task.Delay(200);
             CaptureWindow(Path.Combine(output, "04-about.png"));
             await VerifyAutomaticResidueDialog(output);
+            await VerifyLargeFilesPage(output);
             NavApps.IsChecked = true;
             Model.Query = "Microsoft";
             await Task.Delay(250);
@@ -428,9 +437,10 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("Application raised an unhandled exception.", App.LastUnhandledException);
             File.WriteAllText(Path.Combine(output, "ui-smoke.json"), System.Text.Json.JsonSerializer.Serialize(new
             {
-                ok = true, apps = Model.AppCount, searchVerified = true, pages = 4,
+                ok = true, apps = Model.AppCount, searchVerified = true, pages = 5,
                 sortCombinations = 10, automaticResidueDialogVerified = true, residueConfirmVerified = true,
                 residueCancelVerified = true, residueDelayVerified = true, residueDuplicatePromptPrevented = true,
+                largeFilesPageVerified = true, largeFilesSelectionVerified = true, largeFilesFilterSortVerified = true,
                 usageSortingVerified = true, unknownUsageLast = true,
                 automaticRefreshVerified = true, refreshPreservesState = true,
                 demoDataOnly = true, diskBinding = "OneWay", windowIconLoaded = Icon is not null,

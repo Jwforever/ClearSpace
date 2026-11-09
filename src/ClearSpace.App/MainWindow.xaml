@@ -29,6 +29,9 @@
           <RadioButton x:Name="NavCleanup" Style="{StaticResource Nav}" GroupName="Navigation" Tag="cleanup" Checked="Navigate">
             <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74D;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,2,14,0" /><TextBlock Text="空间清理" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></StackPanel>
           </RadioButton>
+          <RadioButton x:Name="NavLargeFiles" Style="{StaticResource Nav}" GroupName="Navigation" Tag="large" Checked="Navigate">
+            <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,2,14,0" /><TextBlock Text="大文件清理" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></StackPanel>
+          </RadioButton>
           <RadioButton x:Name="NavHistory" Style="{StaticResource Nav}" GroupName="Navigation" Tag="history" Checked="Navigate">
             <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE81C;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,2,14,0" /><TextBlock Text="操作记录" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></StackPanel>
           </RadioButton>
@@ -43,7 +46,7 @@
           <RadioButton x:Name="NavAbout" Style="{StaticResource Nav}" GroupName="Navigation" Tag="about" Checked="Navigate">
             <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE946;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,2,14,0" /><TextBlock Text="关于清屿" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></StackPanel>
           </RadioButton>
-          <TextBlock Text="PREVIEW  0.3.1" Foreground="#5E7C6B" FontSize="9" Margin="17,14,0,0" />
+          <TextBlock Text="PREVIEW  0.4.0" Foreground="#5E7C6B" FontSize="9" Margin="17,14,0,0" />
         </StackPanel>
       </Grid>
     </Border>
@@ -78,9 +81,9 @@
         </Border>
         <Border Grid.Column="2" Style="{StaticResource Card}" Background="#EEF3E9" BorderBrush="#E0E8D9">
           <StackPanel>
-            <TextBlock Text="已扫描的可整理文件" Foreground="#72816A" FontSize="12" />
-            <TextBlock Text="{Binding ScannedSize}" Foreground="#426A43" FontSize="28" FontWeight="SemiBold" Margin="0,11,0,5" />
-            <TextBlock Text="{Binding ScannedHint}" Foreground="#8D9C80" FontSize="10" />
+            <TextBlock Foreground="#72816A" FontSize="12"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="已扫描的可整理文件" /><Style.Triggers><DataTrigger Binding="{Binding IsChecked, ElementName=NavLargeFiles}" Value="True"><Setter Property="Text" Value="本次发现的大文件" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+            <TextBlock Foreground="#426A43" FontSize="28" FontWeight="SemiBold" Margin="0,11,0,5"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="{Binding ScannedSize}" /><Style.Triggers><DataTrigger Binding="{Binding IsChecked, ElementName=NavLargeFiles}" Value="True"><Setter Property="Text" Value="{Binding LargeFiles.TotalSizeText, RelativeSource={RelativeSource AncestorType=Window}}" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+            <TextBlock Foreground="#8D9C80" FontSize="10"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="{Binding ScannedHint}" /><Style.Triggers><DataTrigger Binding="{Binding IsChecked, ElementName=NavLargeFiles}" Value="True"><Setter Property="Text" Value="{Binding LargeFiles.TotalHint, RelativeSource={RelativeSource AncestorType=Window}}" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
           </StackPanel>
         </Border>
       </Grid>
@@ -184,6 +187,39 @@
           <TextBlock Grid.Row="3" Text="{Binding CleanupSummary}" TextWrapping="Wrap" FontSize="10" Foreground="#8B988B" Margin="2,10,0,0" MaxHeight="44" />
         </Grid>
 
+        <Grid x:Name="LargeFilesPage" Visibility="Collapsed" DataContext="{Binding LargeFiles, RelativeSource={RelativeSource AncestorType=Window}}">
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <Grid Margin="0,0,0,12" IsEnabled="{Binding CanAct}">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="200" /></Grid.ColumnDefinitions>
+            <TextBox x:Name="LargeTargetPath" Text="{Binding TargetPath, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" Padding="10,8" FontSize="12" BorderBrush="#DFE6DF" Margin="0,0,9,0" AutomationProperties.Name="大文件扫描位置" ToolTip="输入本地磁盘或文件夹的完整路径" />
+            <Button x:Name="ChooseLargeFolderButton" Grid.Column="1" Content="选择文件夹" Click="ChooseLargeFolder_Click" Margin="0,0,9,0" />
+            <Grid Grid.Column="2"><ComboBox x:Name="LargeDriveChoice" ItemsSource="{Binding Drives}" DisplayMemberPath="Label" SelectedItem="{Binding SelectedDrive, Mode=TwoWay}" Padding="8" VerticalContentAlignment="Center" AutomationProperties.Name="选择扫描磁盘" ToolTip="选择整块磁盘扫描" /><TextBlock Text="或选择磁盘…" Foreground="#84917E" FontSize="11" Margin="10,0,25,0" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SelectedDrive}" Value="{x:Null}"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></Grid>
+          </Grid>
+          <Grid Grid.Row="1" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="105" /><ColumnDefinition Width="140" /><ColumnDefinition Width="*" /><ColumnDefinition Width="115" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <ComboBox x:Name="LargeMinimum" SelectedIndex="{Binding MinimumIndex, Mode=TwoWay}" IsEnabled="{Binding CanAct}" Padding="7" Margin="0,0,9,0" VerticalContentAlignment="Center" AutomationProperties.Name="最小文件大小"><ComboBoxItem Content="≥ 100 MB" /><ComboBoxItem Content="≥ 500 MB" /><ComboBoxItem Content="≥ 1 GB" /><ComboBoxItem Content="≥ 5 GB" /></ComboBox>
+            <ComboBox x:Name="LargeType" Grid.Column="1" ItemsSource="{Binding Types}" SelectedIndex="{Binding TypeIndex, Mode=TwoWay}" Padding="7" Margin="0,0,9,0" VerticalContentAlignment="Center" AutomationProperties.Name="大文件类型筛选" />
+            <Border Grid.Column="2" Background="White" BorderBrush="#DFE6DF" BorderThickness="1" CornerRadius="7" Margin="0,0,9,0"><Grid Margin="10,0"><TextBox x:Name="LargeSearch" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}" Background="Transparent" BorderThickness="0" Padding="0" VerticalContentAlignment="Center" FontSize="11" AutomationProperties.Name="搜索大文件" /><TextBlock Text="搜索文件名或路径…" Foreground="#A1ABA2" FontSize="11" IsHitTestVisible="False" VerticalAlignment="Center"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding Query.Length}" Value="0"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></Grid></Border>
+            <ComboBox x:Name="LargeSort" Grid.Column="3" SelectedIndex="{Binding SortIndex, Mode=TwoWay}" Padding="7" Margin="0,0,9,0" VerticalContentAlignment="Center" AutomationProperties.Name="大文件排序"><ComboBoxItem Content="大小降序" /><ComboBoxItem Content="大小升序" /><ComboBoxItem Content="最新修改" /><ComboBoxItem Content="文件名称" /></ComboBox>
+            <Button x:Name="ScanLargeFilesButton" Grid.Column="4" Content="开始扫描" Click="ScanLargeFiles_Click" IsEnabled="{Binding CanAct}" Margin="0,0,9,0" />
+            <Button x:Name="CleanLargeFilesButton" Grid.Column="5" Content="{Binding CleanLabel}" Click="CleanLargeFiles_Click" Style="{StaticResource Primary}" IsEnabled="{Binding CanClean}" />
+          </Grid>
+          <Border Grid.Row="2" Background="White" CornerRadius="10" BorderBrush="{StaticResource Line}" BorderThickness="1" ClipToBounds="True"><Grid>
+            <DataGrid x:Name="LargeFilesGrid" ItemsSource="{Binding View}" IsReadOnly="True" CanUserSortColumns="False" RowHeight="63" HorizontalScrollBarVisibility="Auto" SizeChanged="LargeFilesGrid_SizeChanged" AutomationProperties.Name="大文件扫描结果">
+              <DataGrid.Columns>
+                <DataGridTemplateColumn Width="44"><DataGridTemplateColumn.HeaderTemplate><DataTemplate><CheckBox IsChecked="{Binding DataContext.AllVisibleSelected, RelativeSource={RelativeSource AncestorType=DataGrid}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding DataContext.CanAct, RelativeSource={RelativeSource AncestorType=DataGrid}}" ToolTip="全选 / 取消选择当前筛选结果" AutomationProperties.Name="全选可见大文件" /></DataTemplate></DataGridTemplateColumn.HeaderTemplate><DataGridTemplateColumn.CellTemplate><DataTemplate><CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding DataContext.CanAct, RelativeSource={RelativeSource AncestorType=DataGrid}}" AutomationProperties.Name="选择大文件" /></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="文件与完整位置" Width="*" MinWidth="200"><DataGridTemplateColumn.CellTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" /><TextBlock Text="{Binding Path}" FontSize="10" Foreground="#98A391" Margin="0,5,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" /></StackPanel></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+                <DataGridTextColumn Header="类型" Binding="{Binding TypeText}" Width="115" />
+                <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="90" />
+                <DataGridTextColumn Header="最后修改" Binding="{Binding ModifiedText}" Width="145" />
+                <DataGridTemplateColumn Header="操作" Width="76"><DataGridTemplateColumn.CellTemplate><DataTemplate><Button Content="定位" Padding="11,6" FontSize="11" Click="LocateLargeFile_Click" Tag="{Binding}" ToolTip="在资源管理器中选中此文件" /></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+              </DataGrid.Columns>
+            </DataGrid>
+            <TextBlock Text="{Binding EmptyText}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#8B9A84" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding View.IsEmpty}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+          </Grid></Border>
+          <StackPanel Grid.Row="3" Margin="2,10,2,0"><Grid><TextBlock Text="{Binding SelectionText}" FontSize="11" Foreground="#7F9278" /><TextBlock Text="{Binding TotalText}" FontSize="10" Foreground="#98A38F" HorizontalAlignment="Right" /></Grid><TextBlock Text="{Binding Summary}" FontSize="10" Foreground="#8E9C85" Margin="0,6,0,0" TextWrapping="Wrap" MaxHeight="32" ToolTip="{Binding Summary}" /><TextBlock Text="仅列出文件，不会自动删除。系统和应用目录、链接、只读及脱机文件会跳过。" FontSize="10" Foreground="#9DA792" Margin="0,5,0,0" TextWrapping="Wrap" /></StackPanel>
+        </Grid>
+
         <Grid x:Name="HistoryPage" Visibility="Collapsed">
           <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
           <Grid Margin="0,0,0,15"><TextBlock Text="最近的整理与卸载" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" /><Button Content="打开记录文件夹" Click="OpenHistory_Click" HorizontalAlignment="Right" /></Grid>
@@ -210,7 +246,7 @@
             <Border Style="{StaticResource Card}">
               <StackPanel>
                 <TextBlock Text="少一点杂乱，多一点空间。" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12" />
-                <TextBlock Text="清屿 ClearSpace 0.3.1 · Windows 原生预览版" Foreground="#6C846B" />
+                <TextBlock Text="清屿 ClearSpace 0.4.0 · Windows 原生预览版" Foreground="#6C846B" />
                 <TextBlock Text="一个本地运行的软件管理与空间整理工具。无需账号，应用本身不联网，不上传软件列表或文件路径。" TextWrapping="Wrap" Foreground="#83907D" Margin="0,15,0,0" LineHeight="23" />
               </StackPanel>
             </Border>
@@ -218,6 +254,7 @@
               <StackPanel>
                 <TextBlock Text="当前版本的功能边界" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,15" />
                 <TextBlock Text="每个卸载器结束后自动刷新列表，并继续检查延迟变化。排序字段与升序/降序可独立选择，缺失记录始终置后。卸载完成后自动扫描并弹出残留清单，点击“确定”清理全部列出项，点击“取消”跳过。" TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Margin="0,0,0,18" />
+                <TextBlock Text="大文件清理支持选择本地固定磁盘或文件夹，按大小门槛扫描并筛选类型。大文件默认不勾选，确认后移入回收站；系统和应用目录、链接及脱机文件会跳过。下载、视频等个人文件夹仅在主动选择扫描位置后纳入此功能。" TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Margin="0,0,0,18" />
                 <TextBlock TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Text="软件管理读取 HKLM / HKCU 的 32 位与 64 位安装记录，不包含 Microsoft Store 应用或未登记的便携软件。显示的大小由软件提供。&#x0a;&#x0a;卸载会启动软件原有的卸载程序。批量任务逐个执行，卸载窗口可能需要你继续操作。残留弹窗在卸载程序退出、安装记录移除后出现，只扫描卸载前记录的专属位置。文件移入回收站，产品专属注册表项先备份再删除；备份路径写入操作记录，恢复说明保存在备份目录。&#x0a;&#x0a;空间清理只扫描超过 7 天的用户临时文件、崩溃转储和 Chrome / Edge 缓存。浏览器运行时会跳过其缓存。清理逐个移入回收站，回收站清空后才释放磁盘空间；恢复请使用系统回收站。&#x0a;&#x0a;占用中、只读、系统文件和链接会被跳过。清理前会再次核对路径、大小和修改时间。不把下载、文档等个人目录作为清理根目录，不修改服务或系统注册信息，权限不足时跳过。" />
               </StackPanel>
             </Border>

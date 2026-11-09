@@ -54,7 +54,9 @@ public static class PathSafety
         {
             string fullRoot = Normalize(root);
             string fullPath = Path.GetFullPath(path);
-            return fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            string prefix = Path.EndsInDirectorySeparator(fullRoot) ? fullRoot : fullRoot + Path.DirectorySeparatorChar;
+            return !string.Equals(fullPath, fullRoot, StringComparison.OrdinalIgnoreCase) &&
+                fullPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
     }
