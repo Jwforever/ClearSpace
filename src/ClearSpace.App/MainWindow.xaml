@@ -46,7 +46,7 @@
           <RadioButton x:Name="NavAbout" Style="{StaticResource Nav}" GroupName="Navigation" Tag="about" Checked="Navigate">
             <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE946;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,2,14,0" /><TextBlock Text="关于清屿" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></StackPanel>
           </RadioButton>
-          <TextBlock Text="PREVIEW  0.4.0" Foreground="#5E7C6B" FontSize="9" Margin="17,14,0,0" />
+          <TextBlock Text="PREVIEW  0.4.1" Foreground="#5E7C6B" FontSize="9" Margin="17,14,0,0" />
         </StackPanel>
       </Grid>
     </Border>
@@ -246,7 +246,7 @@
             <Border Style="{StaticResource Card}">
               <StackPanel>
                 <TextBlock Text="少一点杂乱，多一点空间。" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12" />
-                <TextBlock Text="清屿 ClearSpace 0.4.0 · Windows 原生预览版" Foreground="#6C846B" />
+                <TextBlock Text="清屿 ClearSpace 0.4.1 · Windows 原生预览版" Foreground="#6C846B" />
                 <TextBlock Text="一个本地运行的软件管理与空间整理工具。无需账号，应用本身不联网，不上传软件列表或文件路径。" TextWrapping="Wrap" Foreground="#83907D" Margin="0,15,0,0" LineHeight="23" />
               </StackPanel>
             </Border>
@@ -255,6 +255,7 @@
                 <TextBlock Text="当前版本的功能边界" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,15" />
                 <TextBlock Text="每个卸载器结束后自动刷新列表，并继续检查延迟变化。排序字段与升序/降序可独立选择，缺失记录始终置后。卸载完成后自动扫描并弹出残留清单，点击“确定”清理全部列出项，点击“取消”跳过。" TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Margin="0,0,0,18" />
                 <TextBlock Text="大文件清理支持选择本地固定磁盘或文件夹，按大小门槛扫描并筛选类型。大文件默认不勾选，确认后移入回收站；系统和应用目录、链接及脱机文件会跳过。下载、视频等个人文件夹仅在主动选择扫描位置后纳入此功能。" TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Margin="0,0,0,18" />
+                <TextBlock Text="扫描已改用快速目录读取；以管理员身份运行并选择整块 NTFS 磁盘时，会尝试 MFT 索引加速（实验性），不支持时自动回退。无需管理员权限也能使用快速扫描，结果显示实际扫描方式和耗时。" TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Margin="0,0,0,18" />
                 <TextBlock TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Text="软件管理读取 HKLM / HKCU 的 32 位与 64 位安装记录，不包含 Microsoft Store 应用或未登记的便携软件。显示的大小由软件提供。&#x0a;&#x0a;卸载会启动软件原有的卸载程序。批量任务逐个执行，卸载窗口可能需要你继续操作。残留弹窗在卸载程序退出、安装记录移除后出现，只扫描卸载前记录的专属位置。文件移入回收站，产品专属注册表项先备份再删除；备份路径写入操作记录，恢复说明保存在备份目录。&#x0a;&#x0a;空间清理只扫描超过 7 天的用户临时文件、崩溃转储和 Chrome / Edge 缓存。浏览器运行时会跳过其缓存。清理逐个移入回收站，回收站清空后才释放磁盘空间；恢复请使用系统回收站。&#x0a;&#x0a;占用中、只读、系统文件和链接会被跳过。清理前会再次核对路径、大小和修改时间。不把下载、文档等个人目录作为清理根目录，不修改服务或系统注册信息，权限不足时跳过。" />
               </StackPanel>
             </Border>

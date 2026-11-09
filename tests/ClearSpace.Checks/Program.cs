@@ -351,6 +351,7 @@ Check("Pending uninstall refresh retains late work and supports batch completion
 
 ResidueChecks.Run(Check, sandbox);
 LargeFileChecks.Run(Check, sandbox);
+NtfsIndexChecks.Run(Check, sandbox);
 
 foreach (string line in lines) Console.WriteLine(line);
 Console.WriteLine($"\n{passed} passed, {failed} failed. Isolated fixtures: {sandbox}");

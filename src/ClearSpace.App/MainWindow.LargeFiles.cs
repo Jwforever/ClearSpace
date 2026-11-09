@@ -49,8 +49,8 @@ public partial class MainWindow
         var progress = new Progress<LargeFileProgress>(p =>
         {
             if (!Model.Busy || operation?.IsCancellationRequested != false) return;
-            Model.Status = $"已检查 {p.InspectedFiles:N0} 个文件 · 匹配 {p.MatchingFiles:N0} 个 · 跳过 {p.SkippedEntries:N0} 项";
-            LargeFiles.Summary = "正在扫描：" + p.Directory;
+            Model.Status = $"{p.Method} · 已检查 {p.InspectedFiles:N0} 个文件 · 匹配 {p.MatchingFiles:N0} 个 · 跳过 {p.SkippedEntries:N0} 项";
+            LargeFiles.Summary = p.Method + "：" + p.Directory;
         });
         try
         {
@@ -120,9 +120,15 @@ public partial class MainWindow
             new() { Path = @"D:\资料\下载\旧版安装包.exe", Length = 850L << 20, LastWriteUtc = DateTime.UtcNow.AddDays(-90) },
             new() { Path = @"D:\资料\镜像\系统镜像.iso", Length = 5800L << 20, LastWriteUtc = DateTime.UtcNow.AddDays(-8) },
             new() { Path = @"D:\资料\备份\项目归档.7z", Length = 420L << 20, LastWriteUtc = DateTime.UtcNow.AddDays(-14) }
-        ], 6824, 5, 12, false, false, []);
+        ], 6824, 5, 12, false, false, [], "快速目录扫描", 0.38);
         LargeFiles.Drives.Add(new(@"D:\", @"D:\  演示磁盘"));
         LargeFiles.TargetPath = @"D:\资料";
+        LargeFiles.SetScan(DemoScan());
+        if (!LargeFiles.Summary.Contains("快速目录扫描") || !LargeFiles.Summary.Contains("0.38 秒"))
+            throw new InvalidOperationException("Scan results must show the actual scan method and elapsed seconds.");
+        LargeFiles.SetScan(DemoScan() with { Method = "NTFS MFT 索引扫描", ElapsedSeconds = 1.25 });
+        if (!LargeFiles.Summary.Contains("NTFS MFT 索引扫描") || !LargeFiles.Summary.Contains("1.25 秒"))
+            throw new InvalidOperationException("Index scan results must display their own method and timing.");
         LargeFiles.SetScan(DemoScan());
         NavLargeFiles.IsChecked = true;
         await Task.Delay(120);
@@ -162,7 +168,7 @@ public partial class MainWindow
             throw new InvalidOperationException("Changing the size threshold must invalidate earlier results.");
         LargeMinimum.SelectedIndex = 0;
         LargeFiles.SetScan(DemoScan());
-        LargeFiles.Summary = "演示结果 · 所有文件默认不选 · 未扫描或清理个人文件。";
+        LargeFiles.Summary = "演示结果 · 快速目录扫描 · 0.38 秒 · 所有文件默认不选 · 未扫描或清理个人文件。";
         Model.Status = "界面预览 · 演示数据 · 未执行卸载或清理";
         await Task.Delay(80);
         CaptureWindow(Path.Combine(output, "08-large-files.png"));

@@ -113,7 +113,7 @@ public sealed class LargeFilesViewModel : ObservableObject
         // DataGrid resets sort descriptions when its source changes; apply the chosen order after binding.
         ApplySort();
         RefreshSelection(); Notify(nameof(EmptyText)); Notify(nameof(TotalText)); Notify(nameof(TotalSizeText)); Notify(nameof(TotalHint));
-        Summary = (scan.Canceled ? "已停止，显示部分结果" : "扫描完成") + $" · 检查 {scan.InspectedFiles:N0} 个文件。" +
+        Summary = (scan.Canceled ? "已停止，显示部分结果" : "扫描完成") + $" · {scan.Method} · {scan.ElapsedSeconds:0.00} 秒 · 检查 {scan.InspectedFiles:N0} 个文件。" +
             (scan.Notes.Count > 0 ? "  " + string.Join("  ", scan.Notes) : " 文件默认不选，核对后勾选；清空回收站后才释放空间。");
     }
     public void Invalidate()
