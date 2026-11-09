@@ -32,6 +32,9 @@
           <RadioButton x:Name="NavHistory" Style="{StaticResource Nav}" GroupName="Navigation" Tag="history" Checked="Navigate">
             <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE81C;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,2,14,0" /><TextBlock Text="操作记录" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></StackPanel>
           </RadioButton>
+          <RadioButton x:Name="NavResidues" Style="{StaticResource Nav}" GroupName="Navigation" Tag="residues" Checked="Navigate">
+            <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8A7;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,2,14,0" /><TextBlock Text="卸载残留" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></StackPanel>
+          </RadioButton>
         </StackPanel>
         <StackPanel Grid.Row="3">
           <Border Background="#1A392D" CornerRadius="9" Padding="14" Margin="0,0,0,15">
@@ -43,7 +46,7 @@
           <RadioButton x:Name="NavAbout" Style="{StaticResource Nav}" GroupName="Navigation" Tag="about" Checked="Navigate">
             <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE946;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,2,14,0" /><TextBlock Text="关于清屿" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></StackPanel>
           </RadioButton>
-          <TextBlock Text="PREVIEW  0.2.0" Foreground="#5E7C6B" FontSize="9" Margin="17,14,0,0" />
+          <TextBlock Text="PREVIEW  0.3.0" Foreground="#5E7C6B" FontSize="9" Margin="17,14,0,0" />
         </StackPanel>
       </Grid>
     </Border>
@@ -87,9 +90,9 @@
 
       <Grid Grid.Row="2">
         <Grid x:Name="AppsPage">
-          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
           <Grid Margin="0,0,0,15">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="210" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="145" /><ColumnDefinition Width="110" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <Border Background="White" BorderBrush="#DFE6DF" BorderThickness="1" CornerRadius="7" Margin="0,0,12,0" Height="40">
               <Grid Margin="13,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="25" /><ColumnDefinition /></Grid.ColumnDefinitions>
@@ -101,15 +104,16 @@
               </Grid>
             </Border>
             <ComboBox x:Name="AppSort" Grid.Column="1" Margin="0,0,12,0" SelectedIndex="{Binding AppSortIndex, Mode=TwoWay}" VerticalContentAlignment="Center" Padding="8" FontSize="12" AutomationProperties.Name="软件排序">
-              <ComboBoxItem Content="按名称排序" /><ComboBoxItem Content="按占用大小" /><ComboBoxItem Content="按安装日期" />
-              <ComboBoxItem Content="上次使用 · 最近优先" /><ComboBoxItem Content="上次使用 · 最久优先" />
+              <ComboBoxItem Content="软件名称" /><ComboBoxItem Content="占用大小" /><ComboBoxItem Content="安装日期" /><ComboBoxItem Content="上次使用" /><ComboBoxItem Content="发布者" />
             </ComboBox>
-            <Button x:Name="RefreshAppsButton" Grid.Column="2" Content="刷新" Margin="0,0,9,0" Click="RefreshApps_Click" IsEnabled="{Binding CanAct}" />
-            <Button x:Name="UninstallSelectedButton" Grid.Column="3" Content="{Binding UninstallLabel}" Style="{StaticResource Primary}" Click="UninstallSelected_Click" IsEnabled="{Binding CanUninstallSelected}" />
+            <ComboBox x:Name="AppSortDirection" Grid.Column="2" Margin="0,0,12,0" SelectedIndex="{Binding AppSortDirectionIndex, Mode=TwoWay}" VerticalContentAlignment="Center" Padding="8" FontSize="12" AutomationProperties.Name="排序方向"><ComboBoxItem Content="升序 ↑" /><ComboBoxItem Content="降序 ↓" /></ComboBox>
+            <Button x:Name="RefreshAppsButton" Grid.Column="3" Content="刷新" Margin="0,0,9,0" Click="RefreshApps_Click" IsEnabled="{Binding CanAct}" />
+            <Button x:Name="UninstallSelectedButton" Grid.Column="4" Content="{Binding UninstallLabel}" Style="{StaticResource Primary}" Click="UninstallSelected_Click" IsEnabled="{Binding CanUninstallSelected}" />
           </Grid>
-          <Border Grid.Row="1" Background="White" CornerRadius="10" BorderBrush="{StaticResource Line}" BorderThickness="1" ClipToBounds="True">
+          <Grid Grid.Row="1" Margin="0,0,0,12"><TextBlock Text="卸载后可扫描文件、设置和注册表残留，逐项确认后清理。" Foreground="#889682" FontSize="10" VerticalAlignment="Center" /><Button x:Name="OpenResiduesButton" Content="清理残留" Click="OpenResidues_Click" IsEnabled="{Binding CanAct}" HorizontalAlignment="Right" Padding="12,6" FontSize="11" /></Grid>
+          <Border Grid.Row="2" Background="White" CornerRadius="10" BorderBrush="{StaticResource Line}" BorderThickness="1" ClipToBounds="True">
             <Grid>
-              <DataGrid x:Name="AppsGrid" ItemsSource="{Binding AppsView}" IsReadOnly="True" AutomationProperties.Name="软件列表">
+              <DataGrid x:Name="AppsGrid" ItemsSource="{Binding AppsView}" IsReadOnly="True" CanUserSortColumns="False" AutomationProperties.Name="软件列表">
                 <DataGrid.Columns>
                   <DataGridTemplateColumn Width="44" CanUserSort="False">
                     <DataGridTemplateColumn.HeaderTemplate><DataTemplate><CheckBox x:Name="SelectAllApps" Click="SelectAllApps_Click" ToolTip="选择当前筛选结果" AutomationProperties.Name="全选软件" /></DataTemplate></DataGridTemplateColumn.HeaderTemplate>
@@ -135,7 +139,28 @@
               </TextBlock>
             </Grid>
           </Border>
-          <StackPanel Grid.Row="2" Margin="2,12,2,0"><Grid><TextBlock Text="{Binding AppListSummary}" FontSize="11" Foreground="#8C998D" /><TextBlock Text="占用大小由软件提供，可能不完整" FontSize="10" Foreground="#A0AA9F" HorizontalAlignment="Right" /></Grid><TextBlock Text="上次使用来自 Windows 当前用户运行记录；无记录不代表从未使用，排序时置于末尾。" FontSize="10" Foreground="#98A494" Margin="0,6,0,0" TextWrapping="Wrap" /></StackPanel>
+          <StackPanel Grid.Row="3" Margin="2,12,2,0"><Grid><TextBlock Text="{Binding AppListSummary}" FontSize="11" Foreground="#8C998D" /><TextBlock Text="占用大小由软件提供，可能不完整" FontSize="10" Foreground="#A0AA9F" HorizontalAlignment="Right" /></Grid><TextBlock Text="升序：从小到大、从旧到新；降序相反。无上次使用记录的应用始终置后。" FontSize="10" Foreground="#98A494" Margin="0,6,0,0" TextWrapping="Wrap" /></StackPanel>
+        </Grid>
+
+        <Grid x:Name="ResiduePage" Visibility="Collapsed" DataContext="{Binding Residues, RelativeSource={RelativeSource AncestorType=Window}}">
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <Border Style="{StaticResource Card}" Padding="17" Margin="0,0,0,14"><StackPanel><TextBlock Text="卸载后的最后一步" FontSize="16" FontWeight="SemiBold" /><TextBlock Text="文件移入回收站；注册表先导出 .reg 备份再删除。残留可能含设置、存档或个人内容，请逐项核对。" TextWrapping="Wrap" FontSize="11" Foreground="#7F8F78" Margin="0,8,0,0" /><TextBlock Text="仅提供本版本卸载前已记录的专属位置。共用目录、系统注册表和权限不足的项目会跳过。" TextWrapping="Wrap" FontSize="10" Foreground="#99A491" Margin="0,6,0,0" /></StackPanel></Border>
+          <Grid Grid.Row="1" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <ComboBox x:Name="ResidueAppChoice" ItemsSource="{Binding Plans}" DisplayMemberPath="DisplayName" SelectedItem="{Binding SelectedPlan, Mode=TwoWay}" IsEnabled="{Binding Model.CanAct, RelativeSource={RelativeSource AncestorType=Window}}" Padding="8" VerticalContentAlignment="Center" Margin="0,0,10,0" AutomationProperties.Name="选择已卸载软件" />
+            <Button x:Name="ScanResiduesButton" Grid.Column="1" Content="扫描残留" Click="ScanResidues_Click" IsEnabled="{Binding CanScan}" Margin="0,0,9,0" />
+            <Button Grid.Column="2" Content="备份文件夹" Click="OpenRegistryBackups_Click" Margin="0,0,9,0" />
+            <Button x:Name="CleanResiduesButton" Grid.Column="3" Content="清理选中项" Style="{StaticResource Primary}" Click="CleanResidues_Click" IsEnabled="{Binding CanClean}" />
+          </Grid>
+          <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10" ClipToBounds="True"><Grid>
+            <DataGrid x:Name="ResidueGrid" ItemsSource="{Binding Candidates}" IsReadOnly="True" RowHeight="72" AutomationProperties.Name="卸载残留预览"><DataGrid.Columns>
+              <DataGridTemplateColumn Width="44" CanUserSort="False"><DataGridTemplateColumn.CellTemplate><DataTemplate><CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="选择残留项" /></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+              <DataGridTextColumn Header="类型" Binding="{Binding TypeText}" Width="95" />
+              <DataGridTemplateColumn Header="完整位置与匹配依据" Width="*"><DataGridTemplateColumn.CellTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding Path}" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" /><TextBlock Text="{Binding Evidence}" Foreground="#94A18B" FontSize="10" Margin="0,6,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding Evidence}" /></StackPanel></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+              <DataGridTextColumn Header="大小 / 处理方式" Binding="{Binding SizeText}" Width="145" />
+            </DataGrid.Columns></DataGrid>
+            <TextBlock Text="选择已卸载软件，点击“扫描残留”查看具体项目。" Foreground="#91A087" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding Candidates.Count}" Value="0"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+          </Grid></Border>
+          <StackPanel Grid.Row="3" Margin="2,10,2,0"><TextBlock Text="{Binding SelectionSummary}" FontSize="11" Foreground="#7D9072" /><TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Foreground="#98A48E" FontSize="10" Margin="0,6,0,0" MaxHeight="58" /></StackPanel>
         </Grid>
 
         <Grid x:Name="CleanupPage" Visibility="Collapsed">
@@ -210,15 +235,15 @@
             <Border Style="{StaticResource Card}">
               <StackPanel>
                 <TextBlock Text="少一点杂乱，多一点空间。" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12" />
-                <TextBlock Text="清屿 ClearSpace 0.2.0 · Windows 原生预览版" Foreground="#6C846B" />
+                <TextBlock Text="清屿 ClearSpace 0.3.0 · Windows 原生预览版" Foreground="#6C846B" />
                 <TextBlock Text="一个本地运行的软件管理与空间整理工具。无需账号，应用本身不联网，不上传软件列表或文件路径。" TextWrapping="Wrap" Foreground="#83907D" Margin="0,15,0,0" LineHeight="23" />
               </StackPanel>
             </Border>
             <Border Style="{StaticResource Card}" Margin="0,15,0,0">
               <StackPanel>
                 <TextBlock Text="当前版本的功能边界" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,15" />
-                <TextBlock Text="每个卸载器结束后自动刷新列表，并继续检查延迟变化。上次使用读取 Windows 当前用户的最近启动记录；没有记录不代表从未使用，最近优先与最久优先两种排序都将无记录的应用置于末尾。" TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Margin="0,0,0,18" />
-                <TextBlock TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Text="软件管理读取 HKLM / HKCU 的 32 位与 64 位安装记录，不包含 Microsoft Store 应用或未登记的便携软件。显示的大小由软件提供。&#x0a;&#x0a;卸载会启动软件原有的卸载程序。批量任务逐个执行，卸载窗口可能需要你继续操作；部分启动器会提前退出，可刷新列表核对结果。首版不自动删除软件残留。&#x0a;&#x0a;空间清理只扫描超过 7 天的用户临时文件、崩溃转储和 Chrome / Edge 缓存。浏览器运行时会跳过其缓存。清理逐个移入回收站，回收站清空后才释放磁盘空间；恢复请使用系统回收站。&#x0a;&#x0a;占用中、只读、系统文件和链接会被跳过。清理前会再次核对路径、大小和修改时间。不会扫描下载、文档等个人目录。" />
+                <TextBlock Text="每个卸载器结束后自动刷新列表，并继续检查延迟变化。排序字段与升序/降序可独立选择，缺失记录始终置后。卸载残留先预览再确认：文件移入回收站，产品专属注册表项先导出备份再删除。" TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Margin="0,0,0,18" />
+                <TextBlock TextWrapping="Wrap" LineHeight="25" Foreground="#7C8977" Text="软件管理读取 HKLM / HKCU 的 32 位与 64 位安装记录，不包含 Microsoft Store 应用或未登记的便携软件。显示的大小由软件提供。&#x0a;&#x0a;卸载会启动软件原有的卸载程序。批量任务逐个执行，卸载窗口可能需要你继续操作。安装记录移除后可点击“清理残留”；仅扫描本版本卸载前已记录的专属位置，所有候选默认不选。注册表备份位于本机 ClearSpace 数据目录，点击“备份文件夹”可查看恢复说明。&#x0a;&#x0a;空间清理只扫描超过 7 天的用户临时文件、崩溃转储和 Chrome / Edge 缓存。浏览器运行时会跳过其缓存。清理逐个移入回收站，回收站清空后才释放磁盘空间；恢复请使用系统回收站。&#x0a;&#x0a;占用中、只读、系统文件和链接会被跳过。清理前会再次核对路径、大小和修改时间。不把下载、文档等个人目录作为清理根目录，不修改服务或系统注册信息，权限不足时跳过。" />
               </StackPanel>
             </Border>
             <StackPanel Orientation="Horizontal" Margin="0,15,0,10">

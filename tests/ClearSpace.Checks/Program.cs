@@ -349,6 +349,8 @@ Check("Pending uninstall refresh retains late work and supports batch completion
     Assert(pending.Observe([]) == 1 && !pending.HasPending);
 });
 
+ResidueChecks.Run(Check, sandbox);
+
 foreach (string line in lines) Console.WriteLine(line);
 Console.WriteLine($"\n{passed} passed, {failed} failed. Isolated fixtures: {sandbox}");
 if (args.Length > 0) File.WriteAllText(args[0], string.Join(Environment.NewLine, lines) + $"\n{passed} passed, {failed} failed\nFixtures: {sandbox}");

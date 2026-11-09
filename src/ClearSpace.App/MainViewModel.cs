@@ -30,6 +30,7 @@ public sealed class MainViewModel : ObservableObject
     private bool hasScanned;
     private bool appsLoaded;
     private int appSortIndex;
+    private int appSortDirectionIndex;
     private string cleanupSummary = "扫描只读取文件信息。选中具体文件后才能执行清理。";
 
     public MainViewModel()
@@ -60,21 +61,32 @@ public sealed class MainViewModel : ObservableObject
         set
         {
             if (!Set(ref appSortIndex, value)) return;
-            using (AppsView.DeferRefresh())
+            ApplyAppSort();
+        }
+    }
+    public int AppSortDirectionIndex
+    {
+        get => appSortDirectionIndex;
+        set { if (Set(ref appSortDirectionIndex, value)) ApplyAppSort(); }
+    }
+    private void ApplyAppSort()
+    {
+        var direction = AppSortDirectionIndex == 0 ? ListSortDirection.Ascending : ListSortDirection.Descending;
+        using (AppsView.DeferRefresh())
+        {
+            AppsView.SortDescriptions.Clear();
+            string? known = AppSortIndex switch
             {
-                AppsView.SortDescriptions.Clear();
-                if (value is 3 or 4)
-                    AppsView.SortDescriptions.Add(new(nameof(InstalledApp.HasUsageRecord), ListSortDirection.Descending));
-                AppsView.SortDescriptions.Add(value switch
-                {
-                    1 => new(nameof(InstalledApp.EstimatedBytes), ListSortDirection.Descending),
-                    2 => new(nameof(InstalledApp.InstallDate), ListSortDirection.Descending),
-                    3 => new(nameof(InstalledApp.LastUsedUtc), ListSortDirection.Descending),
-                    4 => new(nameof(InstalledApp.LastUsedUtc), ListSortDirection.Ascending),
-                    _ => new(nameof(InstalledApp.Name), ListSortDirection.Ascending)
-                });
-                if (value != 0) AppsView.SortDescriptions.Add(new(nameof(InstalledApp.Name), ListSortDirection.Ascending));
-            }
+                1 => nameof(InstalledApp.HasSizeEstimate), 2 => nameof(InstalledApp.HasInstallDate),
+                3 => nameof(InstalledApp.HasUsageRecord), _ => null
+            };
+            if (known is not null) AppsView.SortDescriptions.Add(new(known, ListSortDirection.Descending));
+            AppsView.SortDescriptions.Add(new(AppSortIndex switch
+            {
+                1 => nameof(InstalledApp.EstimatedBytes), 2 => nameof(InstalledApp.InstallDate),
+                3 => nameof(InstalledApp.LastUsedUtc), 4 => nameof(InstalledApp.Publisher), _ => nameof(InstalledApp.Name)
+            }, direction));
+            if (AppSortIndex != 0) AppsView.SortDescriptions.Add(new(nameof(InstalledApp.Name), ListSortDirection.Ascending));
         }
     }
     public string Status { get => status; set => Set(ref status, value); }

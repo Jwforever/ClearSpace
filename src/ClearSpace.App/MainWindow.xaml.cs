@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = Model;
+        Model.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Model.Busy)) Residues.Busy = Model.Busy; };
         uninstallRefreshTimer.Tick += UninstallRefresh_Tick;
     }
 
@@ -45,6 +46,7 @@ public partial class MainWindow : Window
             return;
         }
         LoadHistory();
+        LoadResiduePlans();
         await RefreshApps();
     }
 
@@ -65,11 +67,13 @@ public partial class MainWindow : Window
         AppsPage.Visibility = page == "apps" ? Visibility.Visible : Visibility.Collapsed;
         CleanupPage.Visibility = page == "cleanup" ? Visibility.Visible : Visibility.Collapsed;
         HistoryPage.Visibility = page == "history" ? Visibility.Visible : Visibility.Collapsed;
+        ResiduePage.Visibility = page == "residues" ? Visibility.Visible : Visibility.Collapsed;
         AboutPage.Visibility = page == "about" ? Visibility.Visible : Visibility.Collapsed;
         (Model.PageTitle, Model.PageDescription) = page switch
         {
             "cleanup" => ("空间清理", "从一次预览开始，为电脑留出更多空间。"),
             "history" => ("操作记录", "每一次整理，都有迹可循。"),
+            "residues" => ("卸载残留", "核对文件与注册表，完成卸载后的整理。"),
             "about" => ("关于清屿", "一个简单、透明的本地整理工具。"),
             _ => ("软件管理", "看清每一款应用，让卸载更从容。")
         };
@@ -101,6 +105,7 @@ public partial class MainWindow : Window
             var apps = await Task.Run(demoAppsReader ?? appsService.Read);
             if (windowClosed) return;
             Model.SetApps(apps);
+            ObserveResiduePlans(apps);
             Model.RefreshDisk();
             int removed = pendingRefresh.Observe(apps);
             if (removed > 0 && !Model.Busy)
@@ -172,7 +177,7 @@ public partial class MainWindow : Window
         string list = string.Join("\n", apps.Take(10).Select(a => "• " + a.Name));
         if (apps.Count > 10) list += $"\n…共 {apps.Count} 个应用";
         if (MessageBox.Show(this,
-                $"将依次启动以下软件自带的卸载程序：\n\n{list}\n\n卸载窗口可能需要你继续操作。当前版本不会自动删除软件残留，也不提供卸载撤销。\n\n是否继续？",
+                $"将依次启动以下软件自带的卸载程序：\n\n{list}\n\n卸载窗口可能需要你继续操作。完成后可点击“清理残留”，核对文件和注册表；残留需单独确认后清理。软件卸载本身不提供撤销。\n\n是否继续？",
                 "确认卸载", MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
         Model.Busy = true;
         uninstallQueueRunning = true;
@@ -191,7 +196,10 @@ public partial class MainWindow : Window
                 {
                     var command = UninstallCommand.Parse(app.UninstallString,
                         Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+                    var residuePlan = await PrepareResiduePlan(app);
+                    if (operation.IsCancellationRequested) { canceled = true; break; }
                     using var process = command.Start(app.MachineWide && !admin);
+                    AddResiduePlan(residuePlan);
                     started++;
                     TrackUninstall(app.Id);
                     AddHistory(new(DateTime.UtcNow, "卸载", app.Name, "已启动软件自带的卸载程序，等待退出。", "已启动"));
@@ -309,7 +317,7 @@ public partial class MainWindow : Window
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
         operation?.Cancel();
-        Model.Status = "正在停止任务 · 已启动的卸载程序仍由其自身控制";
+        Model.Status = uninstallQueueRunning ? "正在停止任务 · 已启动的卸载程序仍由其自身控制" : "正在停止任务，请稍候…";
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
@@ -366,12 +374,15 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("The application window icon was not loaded.");
             AssertUiList("initial");
             foreach (int index in new[] { 3, 4, 1, 2, 0 })
+            foreach (int direction in new[] { 0, 1 })
             {
                 AppSort.SelectedIndex = index;
+                AppSortDirection.SelectedIndex = direction;
                 await Task.Delay(60);
-                AssertAppOrder(index);
+                AssertAppOrder(index, direction);
             }
             AppSort.SelectedIndex = 3;
+            AppSortDirection.SelectedIndex = 1;
             await Task.Delay(100);
             CaptureWindow(Path.Combine(output, "01-apps.png"));
             Width = MinWidth;
@@ -396,6 +407,7 @@ public partial class MainWindow : Window
             NavAbout.IsChecked = true;
             await Task.Delay(200);
             CaptureWindow(Path.Combine(output, "04-about.png"));
+            await VerifyResiduePreview(output);
             NavApps.IsChecked = true;
             Model.Query = "Microsoft";
             await Task.Delay(250);
@@ -412,7 +424,8 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("Application raised an unhandled exception.", App.LastUnhandledException);
             File.WriteAllText(Path.Combine(output, "ui-smoke.json"), System.Text.Json.JsonSerializer.Serialize(new
             {
-                ok = true, apps = Model.AppCount, searchVerified = true, pages = 4,
+                ok = true, apps = Model.AppCount, searchVerified = true, pages = 5,
+                sortCombinations = 10, residuePreviewVerified = true,
                 usageSortingVerified = true, unknownUsageLast = true,
                 automaticRefreshVerified = true, refreshPreservesState = true,
                 demoDataOnly = true, diskBinding = "OneWay", windowIconLoaded = Icon is not null,
@@ -441,22 +454,28 @@ public partial class MainWindow : Window
             throw new InvalidOperationException($"Application list mismatch during {phase}: expected={expectedCount}, view={viewCount}, grid={AppsGrid.Items.Count}; status={Model.Status}");
     }
 
-    private void AssertAppOrder(int index)
+    private void AssertAppOrder(int index, int direction = 0)
     {
-        if (Model.AppSortIndex != index) throw new InvalidOperationException("Sorting selector did not update its binding.");
+        if (Model.AppSortIndex != index || Model.AppSortDirectionIndex != direction)
+            throw new InvalidOperationException("Sorting selectors did not update their bindings.");
         var actual = Model.AppsView.Cast<InstalledApp>().ToList();
         var names = StringComparer.Create(Model.AppsView.Culture, false);
-        IEnumerable<InstalledApp> expected = index switch
+        IEnumerable<InstalledApp> expected = (index, direction) switch
         {
-            1 => Model.Apps.OrderByDescending(a => a.EstimatedBytes).ThenBy(a => a.Name, names),
-            2 => Model.Apps.OrderByDescending(a => a.InstallDate).ThenBy(a => a.Name, names),
-            3 => Model.Apps.OrderByDescending(a => a.HasUsageRecord).ThenByDescending(a => a.LastUsedUtc).ThenBy(a => a.Name, names),
-            4 => Model.Apps.OrderByDescending(a => a.HasUsageRecord).ThenBy(a => a.LastUsedUtc).ThenBy(a => a.Name, names),
+            (1, 0) => Model.Apps.OrderByDescending(a => a.HasSizeEstimate).ThenBy(a => a.EstimatedBytes).ThenBy(a => a.Name, names),
+            (1, 1) => Model.Apps.OrderByDescending(a => a.HasSizeEstimate).ThenByDescending(a => a.EstimatedBytes).ThenBy(a => a.Name, names),
+            (2, 0) => Model.Apps.OrderByDescending(a => a.HasInstallDate).ThenBy(a => a.InstallDate, names).ThenBy(a => a.Name, names),
+            (2, 1) => Model.Apps.OrderByDescending(a => a.HasInstallDate).ThenByDescending(a => a.InstallDate, names).ThenBy(a => a.Name, names),
+            (3, 0) => Model.Apps.OrderByDescending(a => a.HasUsageRecord).ThenBy(a => a.LastUsedUtc).ThenBy(a => a.Name, names),
+            (3, 1) => Model.Apps.OrderByDescending(a => a.HasUsageRecord).ThenByDescending(a => a.LastUsedUtc).ThenBy(a => a.Name, names),
+            (4, 0) => Model.Apps.OrderBy(a => a.Publisher, names).ThenBy(a => a.Name, names),
+            (4, 1) => Model.Apps.OrderByDescending(a => a.Publisher, names).ThenBy(a => a.Name, names),
+            (0, 1) => Model.Apps.OrderByDescending(a => a.Name, names),
             _ => Model.Apps.OrderBy(a => a.Name, names)
         };
         if (!actual.Select(a => a.Id).SequenceEqual(expected.Select(a => a.Id)))
             throw new InvalidOperationException($"Incorrect application sort order for option {index}: actual={string.Join(',', actual.Select(a => a.Id))}; expected={string.Join(',', expected.Select(a => a.Id))}; sorts={string.Join(',', Model.AppsView.SortDescriptions.Select(s => s.PropertyName + ':' + s.Direction))}.");
-        if (index is 3 or 4)
+        if (index == 3)
         {
             bool unknownSeen = false;
             foreach (var app in actual)
@@ -472,7 +491,8 @@ public partial class MainWindow : Window
         var survivor = Model.Apps.Single(a => a.Id == "demo-4");
         survivor.Selected = true;
         Model.Query = "Microsoft";
-        AppSort.SelectedIndex = 4;
+        AppSort.SelectedIndex = 3;
+        AppSortDirection.SelectedIndex = 0;
         int reads = 0;
         demoAppsReader = () =>
         {
@@ -490,11 +510,11 @@ public partial class MainWindow : Window
             if (pendingRefresh.HasPending || reads < 2 || Model.Apps.Any(a => a.Id == "demo-2"))
                 throw new InvalidOperationException("Automatic uninstall refresh did not pick up the delayed removal.");
             if (!ReferenceEquals(survivor, Model.Apps.Single(a => a.Id == "demo-4")) || !survivor.Selected ||
-                Model.Query != "Microsoft" || Model.AppSortIndex != 4 || Model.AppCount != 5)
+                Model.Query != "Microsoft" || Model.AppSortIndex != 3 || Model.AppSortDirectionIndex != 0 || Model.AppCount != 5)
                 throw new InvalidOperationException("Automatic refresh lost row selection, filtering, sorting or app count.");
             AssertUiList("automatic uninstall refresh");
             Model.Query = "";
-            AssertAppOrder(4);
+            AssertAppOrder(3);
             // A second delayed removal happens after the queue has finished, while the user can use the window.
             Model.Busy = false;
             uninstallQueueRunning = false;
@@ -504,7 +524,7 @@ public partial class MainWindow : Window
             while (pendingRefresh.HasPending && DateTime.UtcNow < deadline) await Task.Delay(100);
             if (pendingRefresh.HasPending || Model.AppCount != 4 || !survivor.Selected)
                 throw new InvalidOperationException("Automatic refresh stopped before the child uninstaller removed its entry.");
-            AssertAppOrder(4);
+            AssertAppOrder(3);
             // Metadata and usage updates keep selection and reorder the existing view immediately.
             var updated = CreateDemoApps().Where(a => a.Id is not ("demo-2" or "demo-1")).Select(a => a.Id == "demo-4"
                 ? new InstalledApp { Id = a.Id, Name = a.Name, Publisher = a.Publisher, Version = "2026.2", LastUsedUtc = DateTime.UtcNow.AddDays(-90) }
@@ -523,7 +543,42 @@ public partial class MainWindow : Window
             Model.SetApps(CreateDemoApps());
             foreach (var app in Model.Apps) app.Selected = false;
             AppSort.SelectedIndex = 3;
+            AppSortDirection.SelectedIndex = 1;
         }
+    }
+
+    private async Task VerifyResiduePreview(string output)
+    {
+        var plan = new ResiduePlan { Id = "demo-residue", App = new("demo-old", "轻笔记", "轻笔记工作室", "", ""), RemovalObserved = true };
+        Residues.Plans.Add(plan); Residues.SelectedPlan = plan;
+        var address = new RegistryAddress(Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Registry64, @"Software\轻笔记工作室\轻笔记");
+        Residues.SetScan(new(plan,
+        [
+            new() { Kind = ResidueKind.File, Path = @"C:\Users\Demo\AppData\Roaming\轻笔记\settings.json", Root = @"C:\Users\Demo\AppData\Roaming\轻笔记", Length = 4096, Evidence = "卸载前记录的专属目录 · 演示数据" },
+            new() { Kind = ResidueKind.RegistryKey, Path = address.DisplayName, Address = address, Fingerprint = "demo", Evidence = "卸载前存在的产品专属键 · 删除前导出备份 · 演示数据" }
+        ], []));
+        Residues.Summary = "演示预览 · 所有项目默认不勾选，未执行任何清理。";
+        NavResidues.IsChecked = true;
+        await Task.Delay(100);
+        if (ResiduePage.Visibility != Visibility.Visible || ResidueGrid.Items.Count != 2 ||
+            Residues.Candidates.Any(c => c.Selected) || CleanResiduesButton.IsEnabled)
+            throw new InvalidOperationException("Residue preview did not display unchecked candidates with cleaning disabled.");
+        Residues.Candidates[0].Selected = true;
+        await Task.Delay(50);
+        if (!CleanResiduesButton.IsEnabled) throw new InvalidOperationException("Selecting a residue did not enable the confirmation action.");
+        Model.Busy = true;
+        await Task.Delay(50);
+        if (CleanResiduesButton.IsEnabled || ScanResiduesButton.IsEnabled)
+            throw new InvalidOperationException("Residue actions must remain disabled while another task is running.");
+        Model.Busy = false;
+        Residues.Candidates[0].Selected = false;
+        await Task.Delay(50);
+        if (CleanResiduesButton.IsEnabled) throw new InvalidOperationException("Clearing residue selection must disable cleaning.");
+        CaptureWindow(Path.Combine(output, "06-residues.png"));
+        Width = MinWidth; Height = MinHeight;
+        await Task.Delay(80);
+        CaptureWindow(Path.Combine(output, "07-residues-minimum.png"));
+        Width = 1260; Height = 850;
     }
 
     private void CaptureWindow(string path)

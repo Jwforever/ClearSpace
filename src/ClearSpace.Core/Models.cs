@@ -32,6 +32,8 @@ public sealed class InstalledApp : ObservableObject
     public string RegistryPath { get; init; } = "";
     public bool MachineWide { get; init; }
     public long EstimatedBytes { get; init; }
+    public bool HasSizeEstimate => EstimatedBytes > 0;
+    public bool HasInstallDate => DateTime.TryParseExact(InstallDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _);
     public DateTime? LastUsedUtc
     {
         get => lastUsedUtc;

@@ -10,7 +10,12 @@ public sealed class InstalledAppsService
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
     private readonly WindowsAppUsageReader usageReader = new();
 
-    public IReadOnlyList<InstalledApp> Read()
+    public IReadOnlyList<InstalledApp> Read() => Read(includeHidden: false, includeUsage: true);
+
+    // Residue removal must also account for components omitted from the user-facing list.
+    public IReadOnlyList<InstalledApp> ReadRegistrations() => Read(includeHidden: true, includeUsage: false);
+
+    private IReadOnlyList<InstalledApp> Read(bool includeHidden, bool includeUsage)
     {
         var apps = new List<InstalledApp>();
         foreach (RegistryHive hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
@@ -28,8 +33,8 @@ public sealed class InstalledAppsService
                         using var sub = root.OpenSubKey(subName);
                         if (sub is null) continue;
                         string name = Text(sub, "DisplayName");
-                        if (string.IsNullOrWhiteSpace(name) || Text(sub, "SystemComponent") == "1" ||
-                            !string.IsNullOrEmpty(Text(sub, "ParentKeyName"))) continue;
+                        if (string.IsNullOrWhiteSpace(name) || (!includeHidden && (Text(sub, "SystemComponent") == "1" ||
+                            !string.IsNullOrEmpty(Text(sub, "ParentKeyName"))))) continue;
                         string uninstall = Text(sub, "UninstallString");
                         string date = Text(sub, "InstallDate");
                         if (DateTime.TryParseExact(date, "yyyyMMdd", CultureInfo.InvariantCulture,
@@ -57,7 +62,7 @@ public sealed class InstalledAppsService
         }
         var result = apps.GroupBy(a => (a.Name.ToUpperInvariant(), a.Version, a.UninstallString, a.MachineWide))
             .Select(g => g.First()).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
-        AppUsageMatcher.Apply(result, usageReader.Read());
+        if (includeUsage) AppUsageMatcher.Apply(result, usageReader.Read());
         return result;
     }
 
