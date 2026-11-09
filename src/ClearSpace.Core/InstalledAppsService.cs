@@ -8,6 +8,7 @@ namespace ClearSpace.Core;
 public sealed class InstalledAppsService
 {
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+    private readonly WindowsAppUsageReader usageReader = new();
 
     public IReadOnlyList<InstalledApp> Read()
     {
@@ -43,6 +44,7 @@ public sealed class InstalledAppsService
                             Version = EmptyFallback(Text(sub, "DisplayVersion"), "—"),
                             InstallDate = EmptyFallback(date, "—"),
                             InstallLocation = Text(sub, "InstallLocation").Trim('"'),
+                            DisplayIcon = Text(sub, "DisplayIcon"),
                             UninstallString = uninstall, MachineWide = hive == RegistryHive.LocalMachine,
                             RegistryPath = $"{hive} ({view})\\{UninstallKey}\\{subName}",
                             EstimatedBytes = kb > 0 && kb < long.MaxValue / 1024 ? kb * 1024 : 0
@@ -53,8 +55,10 @@ public sealed class InstalledAppsService
             }
             catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException) { }
         }
-        return apps.GroupBy(a => (a.Name.ToUpperInvariant(), a.Version, a.UninstallString, a.MachineWide))
+        var result = apps.GroupBy(a => (a.Name.ToUpperInvariant(), a.Version, a.UninstallString, a.MachineWide))
             .Select(g => g.First()).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        AppUsageMatcher.Apply(result, usageReader.Read());
+        return result;
     }
 
     private static string Text(RegistryKey key, string name) => key.GetValue(name)?.ToString()?.Trim() ?? "";

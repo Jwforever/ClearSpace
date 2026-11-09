@@ -22,7 +22,8 @@ if (Test-Path -LiteralPath $errorFile) { throw (Get-Content -LiteralPath $errorF
 $reportFile = Join-Path $outputPath 'ui-smoke.json'
 if (-not (Test-Path -LiteralPath $reportFile)) { throw 'UI smoke report was not written.' }
 $report = Get-Content -LiteralPath $reportFile -Raw -Encoding UTF8 | ConvertFrom-Json
-if (-not $report.ok -or $report.unhandledException -or -not $report.windowIconLoaded -or $report.diskBinding -ne 'OneWay') {
+if (-not $report.ok -or $report.unhandledException -or -not $report.windowIconLoaded -or $report.diskBinding -ne 'OneWay' -or
+    -not $report.usageSortingVerified -or -not $report.unknownUsageLast -or -not $report.automaticRefreshVerified -or -not $report.refreshPreservesState) {
     throw 'UI smoke regression check failed.'
 }
-Write-Host "UI checks passed: startup, icon, one-way disk binding, $($report.pages) pages and search."
+Write-Host "UI checks passed: startup, icon, $($report.pages) pages, search, usage sorting and automatic uninstall refresh."

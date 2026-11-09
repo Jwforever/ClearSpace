@@ -19,6 +19,7 @@ public abstract class ObservableObject : INotifyPropertyChanged
 public sealed class InstalledApp : ObservableObject
 {
     private bool selected;
+    private DateTime? lastUsedUtc;
     public bool Selected { get => selected; set => Set(ref selected, value); }
     public required string Id { get; init; }
     public required string Name { get; init; }
@@ -26,10 +27,21 @@ public sealed class InstalledApp : ObservableObject
     public string Version { get; init; } = "—";
     public string InstallDate { get; init; } = "—";
     public string InstallLocation { get; init; } = "";
+    public string DisplayIcon { get; init; } = "";
     public string UninstallString { get; init; } = "";
     public string RegistryPath { get; init; } = "";
     public bool MachineWide { get; init; }
     public long EstimatedBytes { get; init; }
+    public DateTime? LastUsedUtc
+    {
+        get => lastUsedUtc;
+        set
+        {
+            if (Set(ref lastUsedUtc, value)) { Notify(nameof(LastUsedText)); Notify(nameof(HasUsageRecord)); }
+        }
+    }
+    public bool HasUsageRecord => LastUsedUtc.HasValue;
+    public string LastUsedText => LastUsedUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "无记录";
     public string SizeText => EstimatedBytes > 0 ? Format.Bytes(EstimatedBytes) : "未提供";
     public string Initial => string.IsNullOrEmpty(Name) ? "?" : Name[..1].ToUpperInvariant();
     public string Scope => MachineWide ? "所有用户" : "当前用户";

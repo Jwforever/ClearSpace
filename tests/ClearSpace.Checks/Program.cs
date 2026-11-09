@@ -259,12 +259,94 @@ Check("Installed apps can be enumerated without launching an uninstaller", () =>
 {
     var apps = new InstalledAppsService().Read();
     Assert(apps.Count > 0 && apps.All(a => !string.IsNullOrWhiteSpace(a.Name)));
+    lines.Add($"INFO Current-user usage records matched {apps.Count(a => a.HasUsageRecord)} of {apps.Count} installed apps.");
 });
 Check("Real recycle-bin integration uses only a newly-created fixture", () =>
 {
     string root = Folder("recycle-integration"); string path = Sample(root, "clearspace-recycle-check.tmp");
     var result = Execute(root, Scan(root).Files, new WindowsRecycleBin());
     Assert(result.Succeeded == 1 && !File.Exists(path), string.Join("; ", result.Errors));
+});
+
+Check("UserAssist decodes UTC launch time and rejects unsupported records", () =>
+{
+    DateTime now = DateTime.UtcNow, last = now.AddDays(-3);
+    byte[] data = new byte[72];
+    BitConverter.GetBytes(last.ToFileTimeUtc()).CopyTo(data, 60);
+    Assert(WindowsAppUsageReader.DecodeUserAssistTime(data, now) == last);
+    Assert(WindowsAppUsageReader.DecodeUserAssistTime(new byte[16], now) is null);
+    Assert(WindowsAppUsageReader.DecodeUserAssistTime(new byte[1612], now) is null);
+    BitConverter.GetBytes(now.AddDays(1).ToFileTimeUtc()).CopyTo(data, 60);
+    Assert(WindowsAppUsageReader.DecodeUserAssistTime(data, now) is null);
+    Assert(WindowsAppUsageReader.DecodeUserAssistTime(new byte[72], now) is null);
+});
+Check("UserAssist ROT13 preserves Chinese and round-trips paths", () =>
+{
+    const string path = @"C:\工具\Example\Example.exe";
+    Assert(WindowsAppUsageReader.Rot13(WindowsAppUsageReader.Rot13(path)) == path);
+    Assert(WindowsAppUsageReader.Rot13("P:\\Grfg\\Ncc.rkr") == @"C:\Test\App.exe");
+});
+Check("Usage matches nested executable paths and takes the latest launch", () =>
+{
+    var app = new InstalledApp { Id = "usage", Name = "Example", InstallLocation = @"C:\Apps\Example" };
+    DateTime old = DateTime.UtcNow.AddDays(-15), recent = DateTime.UtcNow.AddHours(-1);
+    AppUsageMatcher.Apply([app], [new(@"C:\Apps\Example\bin\App.exe", old), new(@"C:\Apps\Example\bin\App.exe", recent)]);
+    Assert(app.LastUsedUtc == recent && app.HasUsageRecord);
+});
+Check("Usage respects directory boundaries and excludes uninstallers", () =>
+{
+    var app = new InstalledApp { Id = "usage", Name = "Example", InstallLocation = @"C:\Apps\Example" };
+    DateTime recent = DateTime.UtcNow.AddHours(-1);
+    AppUsageMatcher.Apply([app], [new(@"C:\Apps\Example-other\App.exe", recent), new(@"C:\Apps\Example\unins000.exe", recent), new(@"C:\Apps\Example\uninstall.exe", recent)]);
+    Assert(app.LastUsedUtc is null && !app.HasUsageRecord && app.LastUsedText == "无记录");
+});
+Check("Usage associates quoted DisplayIcon executable without installation folder", () =>
+{
+    var app = new InstalledApp { Id = "usage", Name = "Example", DisplayIcon = "\"C:\\Program Files\\Example\\App.exe\",0" };
+    DateTime recent = DateTime.UtcNow.AddMinutes(-5);
+    AppUsageMatcher.Apply([app], [new(@"c:\program files\example\APP.exe", recent)]);
+    Assert(app.LastUsedUtc == recent);
+});
+Check("Usage prefers specific install roots and avoids shared package attribution", () =>
+{
+    var parent = new InstalledApp { Id = "parent", Name = "Suite", InstallLocation = @"C:\Apps\Suite" };
+    var child = new InstalledApp { Id = "child", Name = "Editor", InstallLocation = @"C:\Apps\Suite\Editor" };
+    DateTime recent = DateTime.UtcNow.AddHours(-1);
+    AppUsageMatcher.Apply([parent, child], [new(@"C:\Apps\Suite\Editor\App.exe", recent)]);
+    Assert(parent.LastUsedUtc is null && child.LastUsedUtc == recent);
+    var other = new InstalledApp { Id = "other", Name = "Shared component", InstallLocation = child.InstallLocation };
+    AppUsageMatcher.Apply([child, other], [new(@"C:\Apps\Suite\Editor\App.exe", recent)]);
+    Assert(child.LastUsedUtc is null && other.LastUsedUtc is null);
+});
+Check("Usage never infers ownership from a shared system directory", () =>
+{
+    string shared = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+    var app = new InstalledApp { Id = "shared", Name = "Broken metadata", InstallLocation = shared };
+    AppUsageMatcher.Apply([app], [new(Path.Combine(shared, "Unrelated", "App.exe"), DateTime.UtcNow.AddDays(-1))]);
+    Assert(app.LastUsedUtc is null);
+});
+Check("Pending uninstall refresh waits for registry removal rather than launcher exit", () =>
+{
+    var pending = new PendingUninstallRefresh();
+    DateTime now = DateTime.UtcNow;
+    var app = new InstalledApp { Id = "pending", Name = "Example" };
+    pending.Track(app.Id, now);
+    Assert(pending.ShouldPoll(now.AddSeconds(2), false));
+    Assert(pending.Observe([app]) == 0 && pending.HasPending, "An installed entry must remain visible.");
+    Assert(pending.Observe([]) == 1 && !pending.HasPending);
+    Assert(!pending.ShouldPoll(now.AddSeconds(3), true));
+});
+Check("Pending uninstall refresh retains late work and supports batch completion", () =>
+{
+    var pending = new PendingUninstallRefresh();
+    DateTime now = DateTime.UtcNow;
+    pending.Track("first", now); pending.Track("second", now);
+    Assert(pending.ShouldPoll(now.AddHours(1), true), "A running queue must keep polling.");
+    Assert(!pending.ShouldPoll(now.AddMinutes(4), false) && pending.HasPending);
+    pending.Extend(now.AddMinutes(4));
+    Assert(pending.ShouldPoll(now.AddMinutes(5), false));
+    Assert(pending.Observe([new() { Id = "second", Name = "Second" }]) == 1 && pending.HasPending);
+    Assert(pending.Observe([]) == 1 && !pending.HasPending);
 });
 
 foreach (string line in lines) Console.WriteLine(line);

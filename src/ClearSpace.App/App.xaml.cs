@@ -25,6 +25,7 @@ public partial class App : Application
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
                 e.Handled = true;
+                Current.Shutdown(1);
                 return;
             }
             MessageBox.Show("操作未完成：" + e.Exception.Message, "ClearSpace 清屿", MessageBoxButton.OK, MessageBoxImage.Information);

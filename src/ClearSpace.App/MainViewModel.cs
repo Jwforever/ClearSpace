@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Windows.Data;
 using ClearSpace.Core;
@@ -28,11 +29,13 @@ public sealed class MainViewModel : ObservableObject
     private string pageDescription = "看清每一款应用，让卸载更从容。";
     private bool hasScanned;
     private bool appsLoaded;
+    private int appSortIndex;
     private string cleanupSummary = "扫描只读取文件信息。选中具体文件后才能执行清理。";
 
     public MainViewModel()
     {
         AppsView = CollectionViewSource.GetDefaultView(Apps);
+        AppsView.Culture = CultureInfo.CurrentCulture;
         AppsView.Filter = o => o is InstalledApp app && (string.IsNullOrWhiteSpace(Query) ||
             app.Name.Contains(Query, StringComparison.CurrentCultureIgnoreCase) ||
             app.Publisher.Contains(Query, StringComparison.CurrentCultureIgnoreCase));
@@ -50,6 +53,29 @@ public sealed class MainViewModel : ObservableObject
     {
         get => query;
         set { if (Set(ref query, value)) { AppsView.Refresh(); Notify(nameof(AppListSummary)); } }
+    }
+    public int AppSortIndex
+    {
+        get => appSortIndex;
+        set
+        {
+            if (!Set(ref appSortIndex, value)) return;
+            using (AppsView.DeferRefresh())
+            {
+                AppsView.SortDescriptions.Clear();
+                if (value is 3 or 4)
+                    AppsView.SortDescriptions.Add(new(nameof(InstalledApp.HasUsageRecord), ListSortDirection.Descending));
+                AppsView.SortDescriptions.Add(value switch
+                {
+                    1 => new(nameof(InstalledApp.EstimatedBytes), ListSortDirection.Descending),
+                    2 => new(nameof(InstalledApp.InstallDate), ListSortDirection.Descending),
+                    3 => new(nameof(InstalledApp.LastUsedUtc), ListSortDirection.Descending),
+                    4 => new(nameof(InstalledApp.LastUsedUtc), ListSortDirection.Ascending),
+                    _ => new(nameof(InstalledApp.Name), ListSortDirection.Ascending)
+                });
+                if (value != 0) AppsView.SortDescriptions.Add(new(nameof(InstalledApp.Name), ListSortDirection.Ascending));
+            }
+        }
     }
     public string Status { get => status; set => Set(ref status, value); }
     public string FreeSpace { get => freeSpace; private set => Set(ref freeSpace, value); }
@@ -71,9 +97,37 @@ public sealed class MainViewModel : ObservableObject
 
     public void SetApps(IReadOnlyList<InstalledApp> apps)
     {
-        foreach (var app in Apps) app.PropertyChanged -= AppChanged;
-        Apps.Clear();
-        foreach (var app in apps) { app.PropertyChanged += AppChanged; Apps.Add(app); }
+        var current = Apps.ToDictionary(a => a.Id);
+        var incomingIds = apps.Select(a => a.Id).ToHashSet();
+        // Keep collection change notifications live: a bound DataGrid reads the current row during each update.
+        foreach (var app in Apps.Where(a => !incomingIds.Contains(a.Id)).ToList())
+        {
+            app.PropertyChanged -= AppChanged;
+            Apps.Remove(app);
+        }
+        foreach (var app in apps)
+        {
+            if (current.TryGetValue(app.Id, out var prior))
+            {
+                // Keep selection and row instances during background polling; update changed installation metadata.
+                if (prior.Name == app.Name && prior.Version == app.Version && prior.Publisher == app.Publisher &&
+                    prior.InstallDate == app.InstallDate && prior.EstimatedBytes == app.EstimatedBytes &&
+                    prior.InstallLocation == app.InstallLocation && prior.DisplayIcon == app.DisplayIcon &&
+                    prior.UninstallString == app.UninstallString && prior.RegistryPath == app.RegistryPath &&
+                    prior.MachineWide == app.MachineWide)
+                {
+                    prior.LastUsedUtc = app.LastUsedUtc;
+                    continue;
+                }
+                app.Selected = prior.Selected;
+                prior.PropertyChanged -= AppChanged;
+                int index = Apps.IndexOf(prior);
+                app.PropertyChanged += AppChanged;
+                Apps[index] = app;
+            }
+            else { app.PropertyChanged += AppChanged; Apps.Add(app); }
+        }
+        AppsView.Refresh();
         appsLoaded = true;
         Notify(nameof(AppCount)); Notify(nameof(AppsEmptyText)); RefreshSelections();
     }

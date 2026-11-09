@@ -4,6 +4,7 @@ using System.IO;
 using System.Security.Principal;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using ClearSpace.Core;
 
 namespace ClearSpace.App;
@@ -16,11 +17,18 @@ public partial class MainWindow : Window
     private IReadOnlyList<CleanupRule> scanRules = [];
     private CancellationTokenSource? operation;
     private readonly string[] launchArgs = Environment.GetCommandLineArgs();
+    private readonly SemaphoreSlim appReadGate = new(1, 1);
+    private readonly PendingUninstallRefresh pendingRefresh = new();
+    private readonly DispatcherTimer uninstallRefreshTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private bool uninstallQueueRunning;
+    private bool windowClosed;
+    private Func<IReadOnlyList<InstalledApp>>? demoAppsReader;
 
     public MainWindow()
     {
         InitializeComponent();
         DataContext = Model;
+        uninstallRefreshTimer.Tick += UninstallRefresh_Tick;
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -28,6 +36,7 @@ public partial class MainWindow : Window
         // The UI smoke switch uses invented display data; it never reads registry entries or executes destructive actions.
         if (launchArgs.Contains("--ui-smoke"))
         {
+            demoAppsReader = CreateDemoApps;
             Model.SetApps(CreateDemoApps());
             Model.History.Add(new(DateTime.UtcNow.AddMinutes(-12), "清理", "用户临时文件 · 6.4 MB", "示例：3 个文件已移入系统回收站。", "已移入回收站"));
             Model.History.Add(new(DateTime.UtcNow.AddMinutes(-47), "卸载", "示例工具 2.0", "示例：软件自带的卸载程序已退出。", "进程已退出"));
@@ -41,11 +50,11 @@ public partial class MainWindow : Window
 
     private static IReadOnlyList<InstalledApp> CreateDemoApps() =>
     [
-        new() { Id = "demo-1", Name = "轻笔记", Publisher = "轻笔记工作室", Version = "2.4.0", InstallDate = "2026-09-12", EstimatedBytes = 145L * 1024 * 1024 },
-        new() { Id = "demo-2", Name = "星野音乐", Publisher = "星野科技", Version = "3.8.1", InstallDate = "2026-08-23", EstimatedBytes = 760L * 1024 * 1024 },
+        new() { Id = "demo-1", Name = "轻笔记", Publisher = "轻笔记工作室", Version = "2.4.0", InstallDate = "2026-09-12", EstimatedBytes = 145L * 1024 * 1024, LastUsedUtc = DateTime.UtcNow.AddHours(-2) },
+        new() { Id = "demo-2", Name = "星野音乐", Publisher = "星野科技", Version = "3.8.1", InstallDate = "2026-08-23", EstimatedBytes = 760L * 1024 * 1024, LastUsedUtc = DateTime.UtcNow.AddDays(-15) },
         new() { Id = "demo-3", Name = "Microsoft 示例组件", Publisher = "Microsoft", Version = "1.2.0", InstallDate = "2026-07-02", EstimatedBytes = 48L * 1024 * 1024 },
-        new() { Id = "demo-4", Name = "Code Studio", Publisher = "Microsoft", Version = "2026.1", InstallDate = "2026-06-15", EstimatedBytes = 1270L * 1024 * 1024 },
-        new() { Id = "demo-5", Name = "拾光相册", Publisher = "拾光软件", Version = "5.3.2", InstallDate = "2026-05-28", EstimatedBytes = 234L * 1024 * 1024 },
+        new() { Id = "demo-4", Name = "Code Studio", Publisher = "Microsoft", Version = "2026.1", InstallDate = "2026-06-15", EstimatedBytes = 1270L * 1024 * 1024, LastUsedUtc = DateTime.UtcNow.AddMinutes(-25) },
+        new() { Id = "demo-5", Name = "拾光相册", Publisher = "拾光软件", Version = "5.3.2", InstallDate = "2026-05-28", EstimatedBytes = 234L * 1024 * 1024, LastUsedUtc = DateTime.UtcNow.AddDays(-60) },
         new() { Id = "demo-6", Name = "云端日历", Publisher = "云端团队", Version = "4.1.0", InstallDate = "2026-04-19", EstimatedBytes = 96L * 1024 * 1024 }
     ];
 
@@ -66,37 +75,76 @@ public partial class MainWindow : Window
         };
     }
 
-    private async Task RefreshApps()
+    private async Task<bool> RefreshApps()
     {
-        if (Model.Busy) return;
+        if (Model.Busy) return false;
         Model.Busy = true;
         Model.Status = "正在读取本机安装记录…";
         try
         {
-            var apps = await Task.Run(appsService.Read);
-            Model.SetApps(apps);
-            Model.RefreshDisk();
-            Model.Status = $"已读取 {apps.Count} 个应用 · 刷新于 {DateTime.Now:HH:mm} · 数据仅保存在本机";
+            await ReloadApps();
+            Model.Status = $"已读取 {Model.AppCount} 个应用 · 刷新于 {DateTime.Now:HH:mm} · 数据仅保存在本机";
+            return true;
         }
-        catch (Exception ex) { ShowError(ex); }
+        catch (Exception ex) { ShowError(ex); return false; }
         finally { Model.Busy = false; }
     }
 
     private async void RefreshApps_Click(object sender, RoutedEventArgs e) => await RefreshApps();
 
-    private void SortChanged(object sender, SelectionChangedEventArgs e)
+    private async Task ReloadApps()
     {
-        if (Model?.AppsView is null || sender is not ComboBox combo) return;
-        using (Model.AppsView.DeferRefresh())
+        await appReadGate.WaitAsync();
+        try
         {
-            Model.AppsView.SortDescriptions.Clear();
-            Model.AppsView.SortDescriptions.Add(combo.SelectedIndex switch
-            {
-                1 => new SortDescription(nameof(InstalledApp.EstimatedBytes), ListSortDirection.Descending),
-                2 => new SortDescription(nameof(InstalledApp.InstallDate), ListSortDirection.Descending),
-                _ => new SortDescription(nameof(InstalledApp.Name), ListSortDirection.Ascending)
-            });
+            if (windowClosed) return;
+            var apps = await Task.Run(demoAppsReader ?? appsService.Read);
+            if (windowClosed) return;
+            Model.SetApps(apps);
+            Model.RefreshDisk();
+            int removed = pendingRefresh.Observe(apps);
+            if (removed > 0 && !Model.Busy)
+                Model.Status = $"已自动刷新 · {removed} 个软件的安装记录已移除 · 刷新于 {DateTime.Now:HH:mm:ss}";
         }
+        finally { appReadGate.Release(); }
+    }
+
+    private void TrackUninstall(string id)
+    {
+        pendingRefresh.Track(id, DateTime.UtcNow);
+        uninstallRefreshTimer.Start();
+    }
+
+    private async void UninstallRefresh_Tick(object? sender, EventArgs e)
+    {
+        if (windowClosed || !pendingRefresh.ShouldPoll(DateTime.UtcNow, uninstallQueueRunning))
+        {
+            uninstallRefreshTimer.Stop();
+            return;
+        }
+        if (appReadGate.CurrentCount == 0) return;
+        try { await ReloadApps(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            if (!Model.Busy) Model.Status = "自动刷新暂未完成，可点击刷新重试。";
+        }
+    }
+
+    private async void Window_Activated(object? sender, EventArgs e)
+    {
+        if (windowClosed || !pendingRefresh.HasPending || launchArgs.Contains("--ui-smoke")) return;
+        // A child uninstaller can outlive its launcher. Returning to ClearSpace always checks pending removals again.
+        pendingRefresh.Extend(DateTime.UtcNow);
+        uninstallRefreshTimer.Start();
+        if (appReadGate.CurrentCount == 0) return;
+        try { await ReloadApps(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
+    }
+
+    private void Window_Closed(object? sender, EventArgs e)
+    {
+        windowClosed = true;
+        uninstallRefreshTimer.Stop();
     }
 
     private void SelectAllApps_Click(object sender, RoutedEventArgs e)
@@ -127,6 +175,7 @@ public partial class MainWindow : Window
                 $"将依次启动以下软件自带的卸载程序：\n\n{list}\n\n卸载窗口可能需要你继续操作。当前版本不会自动删除软件残留，也不提供卸载撤销。\n\n是否继续？",
                 "确认卸载", MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
         Model.Busy = true;
+        uninstallQueueRunning = true;
         operation = new CancellationTokenSource();
         bool canceled = false;
         int started = 0;
@@ -136,6 +185,7 @@ public partial class MainWindow : Window
             foreach (var app in apps)
             {
                 if (operation.IsCancellationRequested) { canceled = true; break; }
+                if (!Model.Apps.Any(a => a.Id == app.Id)) continue;
                 Model.Status = "正在卸载 " + app.Name + " · 请完成软件的卸载向导";
                 try
                 {
@@ -143,6 +193,7 @@ public partial class MainWindow : Window
                         Environment.GetFolderPath(Environment.SpecialFolder.Windows));
                     using var process = command.Start(app.MachineWide && !admin);
                     started++;
+                    TrackUninstall(app.Id);
                     AddHistory(new(DateTime.UtcNow, "卸载", app.Name, "已启动软件自带的卸载程序，等待退出。", "已启动"));
                     try { await process.WaitForExitAsync(operation.Token); }
                     catch (OperationCanceledException)
@@ -153,7 +204,7 @@ public partial class MainWindow : Window
                     }
                     int code = process.ExitCode;
                     AddHistory(new(DateTime.UtcNow, "卸载", app.Name,
-                        $"卸载进程已退出，代码 {code}。部分程序会启动其他进程，请刷新列表核对。",
+                        $"卸载进程已退出，代码 {code}。列表会自动刷新，子进程引起的延迟变化会继续检查。",
                         code switch { 0 => "进程已退出", 3010 => "需要重启", 1602 => "用户已取消", _ => "请核对结果" }));
                 }
                 catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
@@ -169,16 +220,23 @@ public partial class MainWindow : Window
                             MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK)
                     { canceled = true; break; }
                 }
+                // Refresh after each item rather than waiting for the whole batch to finish.
+                try { await ReloadApps(); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+                { Model.Status = "卸载后的刷新暂未完成，稍后将自动重试。"; }
             }
         }
         finally
         {
             operation?.Dispose(); operation = null;
+            uninstallQueueRunning = false;
+            pendingRefresh.Extend(DateTime.UtcNow);
             Model.Busy = false;
         }
-        await RefreshApps();
+        bool refreshed = await RefreshApps();
         Model.Status = canceled ? "已停止卸载队列 · 已启动的卸载程序可能仍在运行" :
-            $"队列已处理 · 启动 {started} 个卸载程序 · 可刷新列表核对卸载结果";
+            $"队列已处理 · 启动 {started} 个卸载程序" + (refreshed ? " · 列表已自动刷新" : " · 列表刷新暂未完成") +
+            (pendingRefresh.HasPending ? " · 继续检查延迟变化，返回窗口时也会刷新" : "");
     }
 
     private async void Scan_Click(object sender, RoutedEventArgs e)
@@ -307,7 +365,21 @@ public partial class MainWindow : Window
             if (Icon is null)
                 throw new InvalidOperationException("The application window icon was not loaded.");
             AssertUiList("initial");
+            foreach (int index in new[] { 3, 4, 1, 2, 0 })
+            {
+                AppSort.SelectedIndex = index;
+                await Task.Delay(60);
+                AssertAppOrder(index);
+            }
+            AppSort.SelectedIndex = 3;
+            await Task.Delay(100);
             CaptureWindow(Path.Combine(output, "01-apps.png"));
+            Width = MinWidth;
+            Height = MinHeight;
+            await Task.Delay(100);
+            CaptureWindow(Path.Combine(output, "05-minimum-size.png"));
+            Width = 1260;
+            Height = 850;
             var demoScan = new ScanResult(
             [
                 new() { Path = @"C:\Users\Demo\AppData\Local\Temp\preview-cache-a.tmp", Root = @"C:\Users\Demo\AppData\Local\Temp", CategoryId = "temp", CategoryTitle = "用户临时文件", Length = 2_621_440, LastWriteUtc = DateTime.UtcNow.AddDays(-14) },
@@ -335,11 +407,14 @@ public partial class MainWindow : Window
             Model.Query = "";
             await Task.Delay(200);
             AssertUiList("search reset");
+            await VerifyAutomaticRefresh();
             if (App.LastUnhandledException is not null)
                 throw new InvalidOperationException("Application raised an unhandled exception.", App.LastUnhandledException);
             File.WriteAllText(Path.Combine(output, "ui-smoke.json"), System.Text.Json.JsonSerializer.Serialize(new
             {
                 ok = true, apps = Model.AppCount, searchVerified = true, pages = 4,
+                usageSortingVerified = true, unknownUsageLast = true,
+                automaticRefreshVerified = true, refreshPreservesState = true,
                 demoDataOnly = true, diskBinding = "OneWay", windowIconLoaded = Icon is not null,
                 unhandledException = App.LastUnhandledException?.ToString(),
                 destructiveActions = 0
@@ -364,6 +439,91 @@ public partial class MainWindow : Window
         int viewCount = Model.AppsView.Cast<InstalledApp>().Count();
         if (expectedCount != viewCount || viewCount != AppsGrid.Items.Count)
             throw new InvalidOperationException($"Application list mismatch during {phase}: expected={expectedCount}, view={viewCount}, grid={AppsGrid.Items.Count}; status={Model.Status}");
+    }
+
+    private void AssertAppOrder(int index)
+    {
+        if (Model.AppSortIndex != index) throw new InvalidOperationException("Sorting selector did not update its binding.");
+        var actual = Model.AppsView.Cast<InstalledApp>().ToList();
+        var names = StringComparer.Create(Model.AppsView.Culture, false);
+        IEnumerable<InstalledApp> expected = index switch
+        {
+            1 => Model.Apps.OrderByDescending(a => a.EstimatedBytes).ThenBy(a => a.Name, names),
+            2 => Model.Apps.OrderByDescending(a => a.InstallDate).ThenBy(a => a.Name, names),
+            3 => Model.Apps.OrderByDescending(a => a.HasUsageRecord).ThenByDescending(a => a.LastUsedUtc).ThenBy(a => a.Name, names),
+            4 => Model.Apps.OrderByDescending(a => a.HasUsageRecord).ThenBy(a => a.LastUsedUtc).ThenBy(a => a.Name, names),
+            _ => Model.Apps.OrderBy(a => a.Name, names)
+        };
+        if (!actual.Select(a => a.Id).SequenceEqual(expected.Select(a => a.Id)))
+            throw new InvalidOperationException($"Incorrect application sort order for option {index}: actual={string.Join(',', actual.Select(a => a.Id))}; expected={string.Join(',', expected.Select(a => a.Id))}; sorts={string.Join(',', Model.AppsView.SortDescriptions.Select(s => s.PropertyName + ':' + s.Direction))}.");
+        if (index is 3 or 4)
+        {
+            bool unknownSeen = false;
+            foreach (var app in actual)
+            {
+                if (!app.HasUsageRecord) unknownSeen = true;
+                else if (unknownSeen) throw new InvalidOperationException("Missing usage records must be sorted last.");
+            }
+        }
+    }
+
+    private async Task VerifyAutomaticRefresh()
+    {
+        var survivor = Model.Apps.Single(a => a.Id == "demo-4");
+        survivor.Selected = true;
+        Model.Query = "Microsoft";
+        AppSort.SelectedIndex = 4;
+        int reads = 0;
+        demoAppsReader = () =>
+        {
+            reads++;
+            // The first poll still sees the app; the next one models a child uninstaller removing it later.
+            return CreateDemoApps().Where(a => reads < 2 || a.Id != "demo-2").ToList();
+        };
+        Model.Busy = true;
+        uninstallQueueRunning = true;
+        TrackUninstall("demo-2");
+        try
+        {
+            DateTime deadline = DateTime.UtcNow.AddSeconds(9);
+            while (pendingRefresh.HasPending && DateTime.UtcNow < deadline) await Task.Delay(100);
+            if (pendingRefresh.HasPending || reads < 2 || Model.Apps.Any(a => a.Id == "demo-2"))
+                throw new InvalidOperationException("Automatic uninstall refresh did not pick up the delayed removal.");
+            if (!ReferenceEquals(survivor, Model.Apps.Single(a => a.Id == "demo-4")) || !survivor.Selected ||
+                Model.Query != "Microsoft" || Model.AppSortIndex != 4 || Model.AppCount != 5)
+                throw new InvalidOperationException("Automatic refresh lost row selection, filtering, sorting or app count.");
+            AssertUiList("automatic uninstall refresh");
+            Model.Query = "";
+            AssertAppOrder(4);
+            // A second delayed removal happens after the queue has finished, while the user can use the window.
+            Model.Busy = false;
+            uninstallQueueRunning = false;
+            demoAppsReader = () => CreateDemoApps().Where(a => a.Id is not ("demo-2" or "demo-1")).ToList();
+            TrackUninstall("demo-1");
+            deadline = DateTime.UtcNow.AddSeconds(5);
+            while (pendingRefresh.HasPending && DateTime.UtcNow < deadline) await Task.Delay(100);
+            if (pendingRefresh.HasPending || Model.AppCount != 4 || !survivor.Selected)
+                throw new InvalidOperationException("Automatic refresh stopped before the child uninstaller removed its entry.");
+            AssertAppOrder(4);
+            // Metadata and usage updates keep selection and reorder the existing view immediately.
+            var updated = CreateDemoApps().Where(a => a.Id is not ("demo-2" or "demo-1")).Select(a => a.Id == "demo-4"
+                ? new InstalledApp { Id = a.Id, Name = a.Name, Publisher = a.Publisher, Version = "2026.2", LastUsedUtc = DateTime.UtcNow.AddDays(-90) }
+                : a).ToList();
+            Model.SetApps(updated);
+            if (!Model.Apps.Single(a => a.Id == "demo-4").Selected || Model.AppsView.Cast<InstalledApp>().First().Id != "demo-4")
+                throw new InvalidOperationException("Refreshing changed metadata lost selection or failed to reorder usage dates.");
+        }
+        finally
+        {
+            uninstallQueueRunning = false;
+            Model.Busy = false;
+            uninstallRefreshTimer.Stop();
+            demoAppsReader = CreateDemoApps;
+            Model.Query = "";
+            Model.SetApps(CreateDemoApps());
+            foreach (var app in Model.Apps) app.Selected = false;
+            AppSort.SelectedIndex = 3;
+        }
     }
 
     private void CaptureWindow(string path)
