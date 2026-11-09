@@ -28,7 +28,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = Model;
-        Model.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Model.Busy)) Residues.Busy = Model.Busy; };
+        Model.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Model.Busy) && !Model.Busy) ScheduleResiduePrompts(); };
         uninstallRefreshTimer.Tick += UninstallRefresh_Tick;
     }
 
@@ -67,13 +67,11 @@ public partial class MainWindow : Window
         AppsPage.Visibility = page == "apps" ? Visibility.Visible : Visibility.Collapsed;
         CleanupPage.Visibility = page == "cleanup" ? Visibility.Visible : Visibility.Collapsed;
         HistoryPage.Visibility = page == "history" ? Visibility.Visible : Visibility.Collapsed;
-        ResiduePage.Visibility = page == "residues" ? Visibility.Visible : Visibility.Collapsed;
         AboutPage.Visibility = page == "about" ? Visibility.Visible : Visibility.Collapsed;
         (Model.PageTitle, Model.PageDescription) = page switch
         {
             "cleanup" => ("空间清理", "从一次预览开始，为电脑留出更多空间。"),
             "history" => ("操作记录", "每一次整理，都有迹可循。"),
-            "residues" => ("卸载残留", "核对文件与注册表，完成卸载后的整理。"),
             "about" => ("关于清屿", "一个简单、透明的本地整理工具。"),
             _ => ("软件管理", "看清每一款应用，让卸载更从容。")
         };
@@ -112,6 +110,7 @@ public partial class MainWindow : Window
                 Model.Status = $"已自动刷新 · {removed} 个软件的安装记录已移除 · 刷新于 {DateTime.Now:HH:mm:ss}";
         }
         finally { appReadGate.Release(); }
+        ScheduleResiduePrompts();
     }
 
     private void TrackUninstall(string id)
@@ -177,7 +176,7 @@ public partial class MainWindow : Window
         string list = string.Join("\n", apps.Take(10).Select(a => "• " + a.Name));
         if (apps.Count > 10) list += $"\n…共 {apps.Count} 个应用";
         if (MessageBox.Show(this,
-                $"将依次启动以下软件自带的卸载程序：\n\n{list}\n\n卸载窗口可能需要你继续操作。完成后可点击“清理残留”，核对文件和注册表；残留需单独确认后清理。软件卸载本身不提供撤销。\n\n是否继续？",
+                $"将依次启动以下软件自带的卸载程序：\n\n{list}\n\n卸载窗口可能需要你继续操作。卸载完成后自动显示残留清单，点击“确定”清理，点击“取消”保留。软件卸载本身不提供撤销。\n\n是否继续？",
                 "确认卸载", MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
         Model.Busy = true;
         uninstallQueueRunning = true;
@@ -200,6 +199,7 @@ public partial class MainWindow : Window
                     if (operation.IsCancellationRequested) { canceled = true; break; }
                     using var process = command.Start(app.MachineWide && !admin);
                     AddResiduePlan(residuePlan);
+                    waitingUninstallIds.Add(app.Id);
                     started++;
                     TrackUninstall(app.Id);
                     AddHistory(new(DateTime.UtcNow, "卸载", app.Name, "已启动软件自带的卸载程序，等待退出。", "已启动"));
@@ -207,9 +207,11 @@ public partial class MainWindow : Window
                     catch (OperationCanceledException)
                     {
                         canceled = true;
+                        if (residuePlan is not null) { residuePlan.PromptPending = false; SaveResiduePlans(); }
                         AddHistory(new(DateTime.UtcNow, "卸载", app.Name, "已停止等待；已启动的卸载程序由其自身控制。", "已停止等待"));
                         break;
                     }
+                    finally { waitingUninstallIds.Remove(app.Id); }
                     int code = process.ExitCode;
                     AddHistory(new(DateTime.UtcNow, "卸载", app.Name,
                         $"卸载进程已退出，代码 {code}。列表会自动刷新，子进程引起的延迟变化会继续检查。",
@@ -232,6 +234,7 @@ public partial class MainWindow : Window
                 try { await ReloadApps(); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
                 { Model.Status = "卸载后的刷新暂未完成，稍后将自动重试。"; }
+                await ProcessReadyResiduePrompts(duringUninstall: true);
             }
         }
         finally
@@ -245,6 +248,7 @@ public partial class MainWindow : Window
         Model.Status = canceled ? "已停止卸载队列 · 已启动的卸载程序可能仍在运行" :
             $"队列已处理 · 启动 {started} 个卸载程序" + (refreshed ? " · 列表已自动刷新" : " · 列表刷新暂未完成") +
             (pendingRefresh.HasPending ? " · 继续检查延迟变化，返回窗口时也会刷新" : "");
+        ScheduleResiduePrompts();
     }
 
     private async void Scan_Click(object sender, RoutedEventArgs e)
@@ -407,7 +411,7 @@ public partial class MainWindow : Window
             NavAbout.IsChecked = true;
             await Task.Delay(200);
             CaptureWindow(Path.Combine(output, "04-about.png"));
-            await VerifyResiduePreview(output);
+            await VerifyAutomaticResidueDialog(output);
             NavApps.IsChecked = true;
             Model.Query = "Microsoft";
             await Task.Delay(250);
@@ -424,8 +428,9 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("Application raised an unhandled exception.", App.LastUnhandledException);
             File.WriteAllText(Path.Combine(output, "ui-smoke.json"), System.Text.Json.JsonSerializer.Serialize(new
             {
-                ok = true, apps = Model.AppCount, searchVerified = true, pages = 5,
-                sortCombinations = 10, residuePreviewVerified = true,
+                ok = true, apps = Model.AppCount, searchVerified = true, pages = 4,
+                sortCombinations = 10, automaticResidueDialogVerified = true, residueConfirmVerified = true,
+                residueCancelVerified = true, residueDelayVerified = true, residueDuplicatePromptPrevented = true,
                 usageSortingVerified = true, unknownUsageLast = true,
                 automaticRefreshVerified = true, refreshPreservesState = true,
                 demoDataOnly = true, diskBinding = "OneWay", windowIconLoaded = Icon is not null,
@@ -547,47 +552,150 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task VerifyResiduePreview(string output)
+    private async Task VerifyAutomaticResidueDialog(string output)
     {
-        var plan = new ResiduePlan { Id = "demo-residue", App = new("demo-old", "轻笔记", "轻笔记工作室", "", ""), RemovalObserved = true };
-        Residues.Plans.Add(plan); Residues.SelectedPlan = plan;
+        if (FindName("NavResidues") is not null || FindName("OpenResiduesButton") is not null || FindName("ResiduePage") is not null)
+            throw new InvalidOperationException("Standalone residue menu, button or page must be removed.");
+        NavApps.IsChecked = true;
+        int scans = 0, dialogs = 0, executions = 0;
+        Exception? dialogError = null;
+        var demoApp = CreateDemoApps().Single(a => a.Id == "demo-1");
+        var plan = new ResiduePlan { Id = "demo-residue", App = ResidueApp.From(demoApp), PromptPending = true };
         var address = new RegistryAddress(Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Registry64, @"Software\轻笔记工作室\轻笔记");
-        Residues.SetScan(new(plan,
-        [
-            new() { Kind = ResidueKind.File, Path = @"C:\Users\Demo\AppData\Roaming\轻笔记\settings.json", Root = @"C:\Users\Demo\AppData\Roaming\轻笔记", Length = 4096, Evidence = "卸载前记录的专属目录 · 演示数据" },
-            new() { Kind = ResidueKind.RegistryKey, Path = address.DisplayName, Address = address, Fingerprint = "demo", Evidence = "卸载前存在的产品专属键 · 删除前导出备份 · 演示数据" }
-        ], []));
-        Residues.Summary = "演示预览 · 所有项目默认不勾选，未执行任何清理。";
-        NavResidues.IsChecked = true;
-        await Task.Delay(100);
-        if (ResiduePage.Visibility != Visibility.Visible || ResidueGrid.Items.Count != 2 ||
-            Residues.Candidates.Any(c => c.Selected) || CleanResiduesButton.IsEnabled)
-            throw new InvalidOperationException("Residue preview did not display unchecked candidates with cleaning disabled.");
-        Residues.Candidates[0].Selected = true;
-        await Task.Delay(50);
-        if (!CleanResiduesButton.IsEnabled) throw new InvalidOperationException("Selecting a residue did not enable the confirmation action.");
-        Model.Busy = true;
-        await Task.Delay(50);
-        if (CleanResiduesButton.IsEnabled || ScanResiduesButton.IsEnabled)
-            throw new InvalidOperationException("Residue actions must remain disabled while another task is running.");
-        Model.Busy = false;
-        Residues.Candidates[0].Selected = false;
-        await Task.Delay(50);
-        if (CleanResiduesButton.IsEnabled) throw new InvalidOperationException("Clearing residue selection must disable cleaning.");
-        CaptureWindow(Path.Combine(output, "06-residues.png"));
-        Width = MinWidth; Height = MinHeight;
-        await Task.Delay(80);
-        CaptureWindow(Path.Combine(output, "07-residues-minimum.png"));
-        Width = 1260; Height = 850;
+        demoResidueScanner = (target, _) =>
+        {
+            scans++;
+            return new(target,
+            [
+                new() { Kind = ResidueKind.File, Path = @"C:\Users\Demo\AppData\Roaming\轻笔记\settings.json", Root = @"C:\Users\Demo\AppData\Roaming\轻笔记", Length = 4096, Evidence = "卸载前记录的专属目录 · 演示数据" },
+                new() { Kind = ResidueKind.RegistryKey, Path = address.DisplayName, Address = address, Fingerprint = "demo", Evidence = "产品专属键 · 删除前导出备份 · 演示数据" }
+            ], []);
+        };
+        demoResidueExecutor = (scan, _) =>
+        {
+            if (scan.Candidates.Count != 2) throw new InvalidOperationException("Confirmation must pass the entire preview to cleanup.");
+            executions++;
+            return new(1, 1, 0, @"C:\Users\Demo\AppData\Local\ClearSpace\RegistryBackups\demo", ["Demo only; no actual files or registry entries were modified."]);
+        };
+        void ArmDialog(bool confirm, bool capture = false, bool closeWindow = false)
+        {
+            demoResidueDialog = dialog =>
+            {
+                dialogs++;
+                dialog.Loaded += async (_, _) =>
+                {
+                    try
+                    {
+                        await Task.Delay(90);
+                        if (!Model.Busy || dialog.Owner != this || dialog.ResidueList.Items.Count != 2 ||
+                            dialog.ResidueList.Columns.Count != 3 || !dialog.ConfirmButton.IsEnabled ||
+                            dialog.ConfirmButton.Content.ToString() != "确定" || dialog.DismissButton.Content.ToString() != "取消")
+                            throw new InvalidOperationException("Residue dialog must show the full list with only OK and Cancel actions.");
+                        await ProcessReadyResiduePrompts();
+                        if (capture)
+                        {
+                            CaptureWindow(dialog, Path.Combine(output, "06-residue-dialog.png"));
+                            dialog.Width = dialog.MinWidth; dialog.Height = dialog.MinHeight;
+                            await Task.Delay(80);
+                            CaptureWindow(dialog, Path.Combine(output, "07-residue-dialog-minimum.png"));
+                        }
+                        if (closeWindow) dialog.Close();
+                        else
+                        {
+                            var button = confirm ? dialog.ConfirmButton : dialog.DismissButton;
+                            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                        }
+                    }
+                    catch (Exception ex) { dialogError = ex; dialog.Close(); }
+                };
+            };
+        }
+        try
+        {
+            residuePlans.Add(plan);
+            ArmDialog(confirm: true, capture: true);
+            ObserveResiduePlans(CreateDemoApps());
+            await ProcessReadyResiduePrompts();
+            if (scans != 0 || dialogs != 0) throw new InvalidOperationException("Software still installed must not trigger a residue prompt.");
+            // During an uninstall, registry removal alone does not interrupt its still-running process.
+            Model.Busy = true;
+            waitingUninstallIds.Add(plan.App.Id);
+            ObserveResiduePlans(CreateDemoApps().Where(a => a.Id != plan.App.Id).ToList());
+            await ProcessReadyResiduePrompts(duringUninstall: true);
+            if (scans != 0 || dialogs != 0) throw new InvalidOperationException("Residue prompt interrupted a running uninstaller.");
+            waitingUninstallIds.Remove(plan.App.Id);
+            await ProcessReadyResiduePrompts(duringUninstall: true);
+            if (dialogError is not null) throw dialogError;
+            if (dialogs != 1 || executions != 1 || plan.PromptPending) throw new InvalidOperationException("OK did not clean the entire preview exactly once.");
+            Model.Busy = false;
+            await ProcessReadyResiduePrompts();
+            if (dialogs != 1 || executions != 1) throw new InvalidOperationException("Completed residue cleanup was prompted twice.");
+
+            // A delayed child-uninstaller removal is detected by the same timer as the real workflow.
+            var delayedApp = CreateDemoApps().Single(a => a.Id == "demo-2");
+            var delayed = new ResiduePlan { Id = "demo-delayed", App = ResidueApp.From(delayedApp), PromptPending = true };
+            residuePlans.Add(delayed);
+            ArmDialog(confirm: false);
+            demoAppsReader = () => CreateDemoApps().Where(a => a.Id != delayedApp.Id).ToList();
+            TrackUninstall(delayedApp.Id);
+            DateTime deadline = DateTime.UtcNow.AddSeconds(6);
+            while ((delayed.PromptPending || processingResiduePrompts) && DateTime.UtcNow < deadline) await Task.Delay(100);
+            if (dialogError is not null) throw dialogError;
+            if (dialogs != 2 || executions != 1 || delayed.PromptPending)
+                throw new InvalidOperationException("Delayed removal did not prompt automatically, or Cancel executed cleanup.");
+            await ReloadApps();
+            await ProcessReadyResiduePrompts();
+            if (dialogs != 2) throw new InvalidOperationException("Cancel caused a duplicate residue prompt.");
+
+            var closed = new ResiduePlan { Id = "demo-closed", App = plan.App, PromptPending = true, RemovalObserved = true };
+            residuePlans.Add(closed);
+            ArmDialog(confirm: false, closeWindow: true);
+            await ProcessReadyResiduePrompts();
+            if (dialogError is not null) throw dialogError;
+            await ProcessReadyResiduePrompts();
+            if (dialogs != 3 || executions != 1 || closed.PromptPending)
+                throw new InvalidOperationException("Closing the dialog must preserve residues and prevent repeat prompts.");
+
+            var empty = new ResiduePlan { Id = "demo-empty", App = plan.App, PromptPending = true, RemovalObserved = true };
+            residuePlans.Add(empty);
+            demoResidueScanner = (target, _) => new(target, [], []);
+            demoResidueDialog = dialog =>
+            {
+                dialogs++;
+                dialog.Loaded += (_, _) => dialog.ConfirmButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            };
+            await ProcessReadyResiduePrompts();
+            if (dialogs != 4 || executions != 1 || empty.PromptPending)
+                throw new InvalidOperationException("An empty residue list should close without executing cleanup.");
+
+            // A blocked scan is not an empty successful scan: do not claim that a reinstalled app is uninstalled.
+            var blocked = new ResiduePlan { Id = "demo-blocked", App = plan.App, PromptPending = true, RemovalObserved = true };
+            residuePlans.Add(blocked);
+            demoResidueScanner = (target, _) => new(target, [], ["Demo reinstallation"], Blocked: true);
+            await ProcessReadyResiduePrompts();
+            if (dialogs != 4 || executions != 1 || blocked.PromptPending)
+                throw new InvalidOperationException("Reinstalled software must not show a residue confirmation dialog.");
+        }
+        finally
+        {
+            demoResidueDialog = null; demoResidueExecutor = null; demoResidueScanner = null;
+            residuePlans.Clear(); waitingUninstallIds.Clear();
+            uninstallRefreshTimer.Stop();
+            Model.Busy = false;
+            demoAppsReader = CreateDemoApps;
+            Model.SetApps(CreateDemoApps());
+        }
     }
 
-    private void CaptureWindow(string path)
+    private void CaptureWindow(string path) => CaptureWindow(this, path);
+
+    private static void CaptureWindow(Window window, string path)
     {
-        UpdateLayout();
-        var root = (FrameworkElement)Content;
+        window.UpdateLayout();
+        var root = (FrameworkElement)window.Content;
         var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96,
             System.Windows.Media.PixelFormats.Pbgra32);
-        bitmap.Render((System.Windows.Media.Visual)Content);
+        bitmap.Render(root);
         var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
         encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);

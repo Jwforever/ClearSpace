@@ -43,7 +43,7 @@ public sealed class ResidueService
         var found = new List<ResidueCandidate>();
         var notes = new List<string>();
         if (!plan.RemovalObserved || ResiduePolicy.AppStillInstalled(plan.App, apps))
-            return new(plan, found, ["该软件的安装记录仍在，尚不能清理残留。请先完成卸载并刷新。"]);
+            return new(plan, found, ["该软件的安装记录仍在，尚不能清理残留。请先完成卸载并刷新。"], Blocked: true);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string root in plan.Directories)
         {

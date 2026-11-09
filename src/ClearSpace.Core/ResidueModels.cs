@@ -22,16 +22,16 @@ public sealed class ResiduePlan : ObservableObject
     public List<string> Directories { get; init; } = [];
     public List<RegistryAddress> RegistryKeys { get; init; } = [];
     public bool RemovalObserved { get => removalObserved; set { if (Set(ref removalObserved, value)) Notify(nameof(DisplayName)); } }
+    // Old manually managed plans stay inactive; only new uninstalls opt in to an automatic prompt.
+    public bool PromptPending { get; set; }
     public string DisplayName => App.Name + " · " + CreatedUtc.ToLocalTime().ToString("MM-dd HH:mm") +
         (RemovalObserved ? " · 已卸载" : " · 等待卸载完成");
 }
 
 public enum ResidueKind { File, RegistryKey }
 
-public sealed class ResidueCandidate : ObservableObject
+public sealed class ResidueCandidate
 {
-    private bool selected;
-    public bool Selected { get => selected; set => Set(ref selected, value); }
     public required ResidueKind Kind { get; init; }
     public required string Path { get; init; }
     public required string Evidence { get; init; }
@@ -44,7 +44,7 @@ public sealed class ResidueCandidate : ObservableObject
     public string SizeText => Kind == ResidueKind.File ? Format.Bytes(Length) : "先备份再删除";
 }
 
-public sealed record ResidueScan(ResiduePlan Plan, IReadOnlyList<ResidueCandidate> Candidates, IReadOnlyList<string> Notes);
+public sealed record ResidueScan(ResiduePlan Plan, IReadOnlyList<ResidueCandidate> Candidates, IReadOnlyList<string> Notes, bool Blocked = false);
 public sealed record ResidueResult(int FilesRecycled, int RegistryKeysRemoved, int Skipped, string BackupDirectory, IReadOnlyList<string> Details);
 
 public sealed class ResiduePlanStore

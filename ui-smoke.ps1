@@ -24,7 +24,8 @@ if (-not (Test-Path -LiteralPath $reportFile)) { throw 'UI smoke report was not 
 $report = Get-Content -LiteralPath $reportFile -Raw -Encoding UTF8 | ConvertFrom-Json
 if (-not $report.ok -or $report.unhandledException -or -not $report.windowIconLoaded -or $report.diskBinding -ne 'OneWay' -or
     -not $report.usageSortingVerified -or -not $report.unknownUsageLast -or -not $report.automaticRefreshVerified -or -not $report.refreshPreservesState -or
-    $report.sortCombinations -ne 10 -or -not $report.residuePreviewVerified) {
+    $report.pages -ne 4 -or $report.sortCombinations -ne 10 -or -not $report.automaticResidueDialogVerified -or
+    -not $report.residueConfirmVerified -or -not $report.residueCancelVerified -or -not $report.residueDelayVerified -or -not $report.residueDuplicatePromptPrevented) {
     throw 'UI smoke regression check failed.'
 }
-Write-Host "UI checks passed: startup, icon, $($report.pages) pages, search, 10 sort combinations, residue preview and automatic uninstall refresh."
+Write-Host "UI checks passed: startup, icon, $($report.pages) pages, search, 10 sort combinations, automatic residue dialog (OK/Cancel/Close/delay) and uninstall refresh."

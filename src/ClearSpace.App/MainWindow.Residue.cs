@@ -1,26 +1,33 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using ClearSpace.Core;
 
 namespace ClearSpace.App;
 
 public partial class MainWindow
 {
-    public ResidueViewModel Residues { get; } = new();
     private readonly ResiduePlanStore residueStore = new();
+    private readonly List<ResiduePlan> residuePlans = [];
+    private readonly HashSet<string> waitingUninstallIds = new(StringComparer.Ordinal);
+    private bool processingResiduePrompts;
+    private Func<ResiduePlan, CancellationToken, ResidueScan>? demoResidueScanner;
+    private Func<ResidueScan, CancellationToken, ResidueResult>? demoResidueExecutor;
+    private Action<ResidueDialog>? demoResidueDialog;
     private ResidueService CreateResidueService() => new(new WindowsResidueRegistry(), new WindowsRecycleBin(), appsService.ReadRegistrations);
 
     private void LoadResiduePlans()
     {
-        foreach (var plan in residueStore.Read()) Residues.Plans.Add(plan);
-        Residues.SelectedPlan = Residues.Plans.FirstOrDefault();
+        residuePlans.AddRange(residueStore.Read());
+        foreach (var plan in residuePlans.Where(p => p.PromptPending)) TrackUninstall(plan.App.Id);
     }
 
-    private void SaveResiduePlans()
+    private bool SaveResiduePlans()
     {
-        try { residueStore.Write(Residues.Plans); }
+        if (launchArgs.Contains("--ui-smoke")) return true;
+        try { residueStore.Write(residuePlans); return true; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        { Model.Status = "残留扫描记录保存失败：" + ex.Message; }
+        { Model.Status = "残留扫描记录保存失败：" + ex.Message; return false; }
     }
 
     private async Task<ResiduePlan?> PrepareResiduePlan(InstalledApp app)
@@ -37,92 +44,113 @@ public partial class MainWindow
     private void AddResiduePlan(ResiduePlan? plan)
     {
         if (plan is null) return;
-        foreach (var prior in Residues.Plans.Where(p => p.App.Id == plan.App.Id).ToList()) Residues.Plans.Remove(prior);
-        Residues.Plans.Insert(0, plan);
-        while (Residues.Plans.Count > 100) Residues.Plans.RemoveAt(Residues.Plans.Count - 1);
-        Residues.SelectedPlan = plan;
+        residuePlans.RemoveAll(p => p.App.Id == plan.App.Id);
+        plan.PromptPending = true;
+        residuePlans.Insert(0, plan);
+        if (residuePlans.Count > 100) residuePlans.RemoveRange(100, residuePlans.Count - 100);
         SaveResiduePlans();
     }
 
     private void ObserveResiduePlans(IReadOnlyList<InstalledApp> apps)
     {
         bool changed = false;
-        foreach (var plan in Residues.Plans.Where(p => !p.RemovalObserved))
+        foreach (var plan in residuePlans.Where(p => p.PromptPending && !p.RemovalObserved))
             if (!ResiduePolicy.AppStillInstalled(plan.App, apps)) { plan.RemovalObserved = true; changed = true; }
-        if (!changed) return;
-        if (!launchArgs.Contains("--ui-smoke")) SaveResiduePlans();
-        if (Residues.SelectedPlan is null) Residues.SelectedPlan = Residues.Plans.FirstOrDefault(p => p.RemovalObserved);
-        if (!Model.Busy) Model.Status = "卸载记录已移除，可点击“清理残留”扫描文件和注册表。";
+        if (changed) SaveResiduePlans();
     }
 
-    private async void OpenResidues_Click(object sender, RoutedEventArgs e)
+    private void ScheduleResiduePrompts()
     {
-        NavResidues.IsChecked = true;
-        Residues.SelectedPlan ??= Residues.Plans.FirstOrDefault(p => p.RemovalObserved) ?? Residues.Plans.FirstOrDefault();
-        if (Residues.CanScan) await ScanResidues();
+        if (windowClosed || !IsLoaded || Model.Busy || processingResiduePrompts || !residuePlans.Any(p => p.PromptPending && p.RemovalObserved)) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(async () => await ProcessReadyResiduePrompts()));
     }
 
-    private async void ScanResidues_Click(object sender, RoutedEventArgs e) => await ScanResidues();
-
-    private async Task ScanResidues()
+    private async Task ProcessReadyResiduePrompts(bool duringUninstall = false)
     {
-        if (Model.Busy || Residues.SelectedPlan is not { } plan) return;
-        if (launchArgs.Contains("--ui-smoke")) return;
-        Model.Busy = true; Residues.Busy = true;
-        operation = new CancellationTokenSource();
-        Residues.SetScan(null);
-        Residues.Summary = "正在扫描卸载前记录的位置…";
+        if (windowClosed || processingResiduePrompts || (Model.Busy && !duringUninstall)) return;
+        // The demo path can only run with explicitly injected synthetic scanners and executors.
+        if (launchArgs.Contains("--ui-smoke") && (demoResidueScanner is null || demoResidueExecutor is null || demoResidueDialog is null)) return;
+        processingResiduePrompts = true;
+        bool ownsOperation = !duringUninstall;
+        if (ownsOperation) { Model.Busy = true; operation = new CancellationTokenSource(); }
+        try
+        {
+            foreach (var plan in residuePlans.Where(p => p.PromptPending && p.RemovalObserved && !waitingUninstallIds.Contains(p.App.Id)).ToList())
+            {
+                var token = operation?.Token ?? CancellationToken.None;
+                if (token.IsCancellationRequested || windowClosed) break;
+                try { await ScanAndPromptResidues(plan, token); }
+                catch (OperationCanceledException)
+                {
+                    plan.PromptPending = false; SaveResiduePlans();
+                    Model.Status = "残留扫描已停止，未继续清理。";
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    plan.PromptPending = false; SaveResiduePlans();
+                    Model.Status = plan.App.Name + " 的残留处理未完成：" + ex.Message;
+                    RecordResidueHistory(new(DateTime.UtcNow, "清理残留", plan.App.Name,
+                        Model.Status + "\n注册表备份位于：" + RegistryBackupRoot, "请核对结果"));
+                }
+            }
+        }
+        finally
+        {
+            if (operation?.IsCancellationRequested == true)
+            {
+                foreach (var plan in residuePlans.Where(p => p.RemovalObserved && p.PromptPending)) plan.PromptPending = false;
+                SaveResiduePlans();
+            }
+            processingResiduePrompts = false;
+            // A timer can observe another delayed removal while this modal flow is active.
+            // Releasing Busy after the guard lets that pending dialog be scheduled normally.
+            if (ownsOperation) { operation?.Dispose(); operation = null; Model.Busy = false; }
+        }
+    }
+
+    private static string RegistryBackupRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClearSpace", "RegistryBackups");
+
+    private async Task ScanAndPromptResidues(ResiduePlan plan, CancellationToken token)
+    {
         Model.Status = "正在扫描 " + plan.App.Name + " 的卸载残留…";
-        try
+        var scan = await Task.Run(() => demoResidueScanner is not null ? demoResidueScanner(plan, token) : CreateResidueService().Scan(plan, token));
+        token.ThrowIfCancellationRequested();
+        // Persist the handled state before opening the modal window, so Cancel or Close never causes a repeat prompt.
+        plan.PromptPending = false;
+        if (!SaveResiduePlans()) throw new IOException("无法保存弹窗处理状态，本次未继续清理。");
+        if (scan.Blocked)
         {
-            var scan = await Task.Run(() => CreateResidueService().Scan(plan, operation.Token));
-            Residues.SetScan(scan);
-            Residues.Summary = $"扫描完成 · {scan.Candidates.Count} 项候选，未执行清理。" +
-                (scan.Notes.Count > 0 ? "  " + string.Join("  ", scan.Notes.Take(5)) : " 请逐项核对后勾选。");
-            Model.Status = $"残留扫描完成 · {scan.Candidates.Count} 项候选 · 请核对后勾选";
+            Model.Status = "检测到软件仍在安装列表中或已重新安装，已跳过残留清理。";
+            return;
         }
-        catch (OperationCanceledException) { Model.Status = Residues.Summary = "残留扫描已取消。"; }
-        catch (Exception ex) { Model.Status = Residues.Summary = "残留扫描未完成：" + ex.Message; }
-        finally { operation?.Dispose(); operation = null; Residues.Busy = false; Model.Busy = false; }
+        var dialog = new ResidueDialog(scan) { Owner = this };
+        demoResidueDialog?.Invoke(dialog);
+        bool confirmed = dialog.ShowDialog() == true;
+        if (!confirmed)
+        {
+            Model.Status = "已跳过 " + plan.App.Name + " 的残留清理。";
+            RecordResidueHistory(new(DateTime.UtcNow, "清理残留", plan.App.Name, "已取消残留清理，列出的文件和注册表项均保留。", "已跳过"));
+            return;
+        }
+        if (scan.Candidates.Count == 0)
+        {
+            Model.Status = plan.App.Name + " 已卸载 · 未发现可清理的残留。";
+            return;
+        }
+        Model.Status = "正在清理 " + plan.App.Name + " 的残留…";
+        var result = await Task.Run(() => demoResidueExecutor is not null ? demoResidueExecutor(scan, token) :
+            CreateResidueService().Execute(scan, scan.Candidates, token));
+        string message = $"已移入回收站 {result.FilesRecycled} 个文件，备份并删除 {result.RegistryKeysRemoved} 个注册表项，跳过 {result.Skipped} 项。";
+        string backupDetail = result.BackupDirectory.Length > 0 ? "\n注册表备份目录：" + result.BackupDirectory : "";
+        RecordResidueHistory(new(DateTime.UtcNow, "清理残留", plan.App.Name, message + backupDetail + "\n" + string.Join("\n", result.Details), result.Skipped > 0 ? "部分完成" : "已处理"));
+        Model.RefreshDisk();
+        Model.Status = message + (result.BackupDirectory.Length > 0 ? "  备份：" + result.BackupDirectory : "");
     }
 
-    private async void CleanResidues_Click(object sender, RoutedEventArgs e)
+    private void RecordResidueHistory(OperationEntry entry)
     {
-        if (Model.Busy || Residues.Scan is not { } scan || launchArgs.Contains("--ui-smoke")) return;
-        var selected = Residues.Candidates.Where(c => c.Selected).ToList();
-        if (selected.Count == 0) return;
-        int files = selected.Count(c => c.Kind == ResidueKind.File), keys = selected.Count - files;
-        string items = string.Join("\n", selected.Take(8).Select(c => "• " + c.Path));
-        if (selected.Count > 8) items += $"\n…共 {selected.Count} 项，完整清单见预览。";
-        if (MessageBox.Show(this, $"{scan.Plan.App.Name}\n\n{items}\n\n" +
-            $"将把 {files} 个文件移入回收站；先备份再删除 {keys} 个注册表项。\n" +
-            "残留可能包含软件设置、存档或个人内容，请确认选中的项目不再需要。\n\n是否清理选中项？",
-            "确认清理卸载残留", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
-        Model.Busy = true; Residues.Busy = true; operation = new CancellationTokenSource();
-        Model.Status = "正在清理 " + scan.Plan.App.Name + " 的选中残留…";
-        try
-        {
-            var result = await Task.Run(() => CreateResidueService().Execute(scan, selected, operation.Token));
-            string message = $"已移入回收站 {result.FilesRecycled} 个文件，备份并删除 {result.RegistryKeysRemoved} 个注册表项，跳过 {result.Skipped} 项。";
-            string backupDetail = result.BackupDirectory.Length > 0 ? "\n注册表备份目录：" + result.BackupDirectory : "";
-            AddHistory(new(DateTime.UtcNow, "清理残留", scan.Plan.App.Name, message + backupDetail + "\n" + string.Join("\n", result.Details), result.Skipped > 0 ? "部分完成" : "已处理"));
-            Residues.SetScan(null);
-            Residues.Summary = message + (result.BackupDirectory.Length > 0 ? "  备份：" + result.BackupDirectory : "") + " 请重新扫描查看剩余项。";
-            Model.RefreshDisk(); Model.Status = message;
-        }
-        catch (Exception ex)
-        {
-            Residues.SetScan(null);
-            Model.Status = Residues.Summary = "任务未完成，请重新扫描核对：" + ex.Message;
-            AddHistory(new(DateTime.UtcNow, "清理残留", scan.Plan.App.Name, Residues.Summary + "\n注册表备份可在“卸载残留 → 备份文件夹”查看。", "请核对结果"));
-        }
-        finally { operation?.Dispose(); operation = null; Residues.Busy = false; Model.Busy = false; }
-    }
-
-    private void OpenRegistryBackups_Click(object sender, RoutedEventArgs e)
-    {
-        string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClearSpace", "RegistryBackups");
-        try { Directory.CreateDirectory(folder); OpenShell(folder); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { ShowError(ex); }
+        if (launchArgs.Contains("--ui-smoke")) Model.History.Insert(0, entry);
+        else AddHistory(entry);
     }
 }

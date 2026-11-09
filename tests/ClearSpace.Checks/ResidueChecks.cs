@@ -37,13 +37,13 @@ static class ResidueChecks
             var service = new ResidueService(registry, bin, () => installed, backups);
             var plan = service.Capture(app, [app]); plan.RemovalObserved = true;
 
-            check("Residue capture records exact pre-uninstall locations and defaults to no selection", () =>
+            check("Residue capture records exact pre-uninstall locations for confirmation", () =>
             {
                 Assert(plan.Directories.Contains(local) && plan.RegistryKeys.Contains(address));
                 var scan = service.Scan(plan, CancellationToken.None);
                 Assert(scan.Candidates.Any(c => c.Path == fixture));
                 Assert(scan.Candidates.Any(c => c.Kind == ResidueKind.RegistryKey));
-                Assert(scan.Candidates.All(c => !c.Selected));
+                Assert(!scan.Blocked);
             });
             check("Residue policy rejects system, personal, shared and unrelated roots", () =>
             {
@@ -68,7 +68,7 @@ static class ResidueChecks
                 installed.Add(app);
                 try
                 {
-                    Assert(service.Scan(plan, CancellationToken.None).Candidates.Count == 0);
+                    Assert(service.Scan(plan, CancellationToken.None) is { Blocked: true, Candidates.Count: 0 });
                     var result = service.Execute(scan, scan.Candidates, CancellationToken.None);
                     Assert(result.FilesRecycled == 0 && result.RegistryKeysRemoved == 0 && registry.Read(address) is not null);
                 }
@@ -155,9 +155,15 @@ static class ResidueChecks
             });
             check("Residue plan store survives restart with full paths and registry view", () =>
             {
+                plan.PromptPending = true;
                 var store = new ResiduePlanStore(Path.Combine(temporary, "residue-store")); store.Write([plan]);
                 var restored = store.Read().Single();
-                Assert(restored.App == plan.App && restored.RemovalObserved && restored.RegistryKeys.Contains(address) && restored.Directories.Contains(local));
+                Assert(restored.App == plan.App && restored.RemovalObserved && restored.PromptPending && restored.RegistryKeys.Contains(address) && restored.Directories.Contains(local));
+                restored.PromptPending = false; store.Write([restored]);
+                Assert(!store.Read().Single().PromptPending);
+                string legacy = System.Text.Json.JsonSerializer.Serialize(plan).Replace("\"PromptPending\":true,", "");
+                File.WriteAllText(Path.Combine(store.DirectoryPath, "residue-plans.json"), "[" + legacy + "]");
+                Assert(!store.Read().Single().PromptPending, "Old manual plans must not trigger automatic prompts after upgrading.");
             });
             check("Residue plan store ignores incomplete records without losing valid plans", () =>
             {
